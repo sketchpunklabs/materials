@@ -1,0 +1,148 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../../lib/Starter.js';
+import FacedCube            from '../../lib/meshes/FacedCube.js';
+import FloorPlane           from '../../lib/meshes/FloorPlane.js';
+
+let App;
+let Debug = {};
+let Ref   = {};
+
+window.addEventListener( "load", async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App = new Starter( { webgl2:false, grid:false, lights:true } );
+    App.setCamera( 20, 20, 2, [0, 0, 0] );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const mat  = customMaterial( );
+    App.add( FloorPlane( { mat, w:50, h:50 } ) );
+    App.add( FacedCube( null, 0.5 ) )
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.render();
+});
+
+function rgba( c, a=1.0 ){
+    const NORMALIZE_RGB	= 1 / 255.0;
+    return [
+        ( c >> 16 & 255 ) * NORMALIZE_RGB,
+        ( c >> 8 & 255 )  * NORMALIZE_RGB,
+        ( c & 255 )       * NORMALIZE_RGB,
+        a
+    ];
+}
+
+function customMaterial(){
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        transparent     : true, 
+        side            : THREE.DoubleSide,
+        // lights          : true,
+
+        uniforms        : { 
+            baseColor : { type :'vec4', value: rgba( 0x3f3f3f, 0 ) },
+            minColor  : { type :'vec4', value: rgba( 0x424242, 1 ) },
+            maxColor  : { type :'vec4', value: rgba( 0x4a4a4a, 1 ) },
+            xColor    : { type :'vec4', value: rgba( 0x6D9529, 1 ) },
+            zColor    : { type :'vec4', value: rgba( 0x96414E, 1 ) },
+
+            minStep   : { type :'float', value: 0.2 },
+            maxSize   : { type :'float', value: 0.01 },
+            axesSize  : { type :'float', value: 0.03 },
+            minRadius : { type :'float', value: 0.43 },
+            maxRadius : { type :'float', value: 0.5 },
+        },
+
+        extensions      : { 
+            derivatives : true
+        },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+        out vec3    fragWPos;  // World Space Position
+        //out vec3    fragNorm;
+        //out vec2    fragUV;
+        
+        void main(){
+            vec4 wPos 	        = modelMatrix * vec4( position, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;                    // View Space
+            
+            //fragUV              = uv;
+            fragWPos            = wPos.xyz;
+            //fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position			= projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+
+        uniform vec4  baseColor;
+        uniform vec4  minColor;
+        uniform vec4  maxColor;
+        uniform vec4  xColor;
+        uniform vec4  zColor;
+        uniform float minStep;   //= 0.2;
+        uniform float maxSize;   //= 0.01;
+        uniform float axesSize;  //= 0.02;
+        uniform float minRadius; //= 0.4;
+        uniform float maxRadius; //= 0.5;
+
+        in  vec3     fragWPos;
+        //in  vec3     fragNorm;
+        //in  vec2     fragUV;
+        out vec4     outColor;    
+
+        // #####################################################################
+
+        void main(){
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Inner Grid
+            vec2 minPos  = fragWPos.xz / minStep;
+            vec2 grid    = abs( fract( minPos - 0.5 ) - 0.5 ) / fwidth( minPos );
+            float mask   = 1.0 - min( grid.x, grid.y );
+            outColor     = mix( baseColor, minColor, mask );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Outer Grid
+            vec2 maxPos  = fragWPos.xz - 0.5;	// Move to the Center of Gradient
+            vec2 fmaxPos = fract( maxPos );		// Normalize-ish, get 0 -> 1
+            vec2 maxPX   = fwidth( maxPos );	// Pixel Width of POS
+            
+            grid = 
+                smoothstep( 0.5 - maxSize - maxPX,	vec2(0.5) - maxSize,	fmaxPos ) - 
+                smoothstep( vec2(0.5) + maxSize,	0.5 + maxSize + maxPX,	fmaxPos );
+            
+            mask     = max( grid.x, grid.y );
+            outColor = mix( outColor, maxColor, mask );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Color Axis Lines
+            vec2 fWPos = fwidth( fragWPos.xz );
+            grid = 1.0 - smoothstep( vec2(axesSize) - fWPos, vec2(axesSize) + fWPos, abs( fragWPos.xz ) );
+
+            outColor = mix( outColor, zColor, grid.y * grid.y * grid.y );
+            outColor = mix( outColor, xColor, grid.x * grid.x * grid.x );
+            
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Draw circle
+            float len 	= length( fragWPos.xz );
+            float pxLen	= fwidth( len );
+            mask        = 1.0 - smoothstep( maxRadius - pxLen, maxRadius + pxLen, len );
+            outColor    = mix( outColor, maxColor, mask );
+
+            // Cut Inner Hole
+            mask       = 1.0 - smoothstep( minRadius - pxLen, minRadius + pxLen, len );
+            outColor.a = mix( outColor.a, 0.0, mask );
+        }`
+    });
+
+    return mat;
+}
+
+</script></body></html>

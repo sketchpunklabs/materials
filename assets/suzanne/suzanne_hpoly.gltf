@@ -1,0 +1,118 @@
+{
+    "asset" : {
+        "generator" : "Khronos glTF Blender I/O v1.1.45",
+        "version" : "2.0"
+    },
+    "scene" : 0,
+    "scenes" : [
+        {
+            "name" : "Scene",
+            "nodes" : [
+                0,
+                1,
+                2
+            ]
+        }
+    ],
+    "nodes" : [
+        {
+            "name" : "Light",
+            "rotation" : [
+                0.16907575726509094,
+                0.7558803558349609,
+                -0.27217137813568115,
+                0.570947527885437
+            ],
+            "translation" : [
+                4.076245307922363,
+                5.903861999511719,
+                5.163384437561035
+            ]
+        },
+        {
+            "name" : "Camera",
+            "rotation" : [
+                0.7090539932250977,
+                -0.002010500058531761,
+                0.002046740148216486,
+                0.7051483988761902
+            ],
+            "translation" : [
+                -0.04285199195146561,
+                -0.07262243330478668,
+                5.400821208953857
+            ]
+        },
+        {
+            "mesh" : 0,
+            "name" : "Suzanne"
+        }
+    ],
+    "meshes" : [
+        {
+            "name" : "Suzanne",
+            "primitives" : [
+                {
+                    "attributes" : {
+                        "POSITION" : 0,
+                        "NORMAL" : 1
+                    },
+                    "indices" : 2
+                }
+            ]
+        }
+    ],
+    "accessors" : [
+        {
+            "bufferView" : 0,
+            "componentType" : 5126,
+            "count" : 10289,
+            "max" : [
+                0.6640928983688354,
+                0.4696180820465088,
+                0.4112207293510437
+            ],
+            "min" : [
+                -0.6640928983688354,
+                -0.485911101102829,
+                -0.3891330659389496
+            ],
+            "type" : "VEC3"
+        },
+        {
+            "bufferView" : 1,
+            "componentType" : 5126,
+            "count" : 10289,
+            "type" : "VEC3"
+        },
+        {
+            "bufferView" : 2,
+            "componentType" : 5123,
+            "count" : 47232,
+            "type" : "SCALAR"
+        }
+    ],
+    "bufferViews" : [
+        {
+            "buffer" : 0,
+            "byteLength" : 123468,
+            "byteOffset" : 0
+        },
+        {
+            "buffer" : 0,
+            "byteLength" : 123468,
+            "byteOffset" : 123468
+        },
+        {
+            "buffer" : 0,
+            "byteLength" : 94464,
+            "byteOffset" : 246936
+        }
+    ],
+    "buffers" : [
+        {
+            "byteLength" : 341400,
+            "uri" : "suzanne_hpoly.bin"
+        }
+    ]
+}

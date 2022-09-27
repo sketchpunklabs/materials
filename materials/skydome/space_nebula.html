@@ -1,0 +1,677 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../../lib/Starter.js';
+
+let App;
+
+window.addEventListener( 'load', _=>{
+	//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App = new Starter( { webgl2:false, grid:true } );
+	App.setCamera( 0, 10, 6 ).render();
+
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	const mat  = customMaterial();
+    const mesh = new THREE.Mesh( new THREE.SphereGeometry( 80, 32, 16 ), mat );
+
+    App.add( mesh );
+});
+
+
+// https://twitter.com/wwwtyro/status/666583785807286273?s=03
+// https://github.com/wwwtyro/space-3d
+
+export default function customMaterial(){
+    const uniforms = {
+        diskColor   : { type: 'vec3', value: new THREE.Color( 0xffffff ) },
+        diskDir     : { type: 'vec3', value: new Float32Array( [0,0,0] ) },
+        diskSize    : { type: 'float', value: 0.0001 },
+        diskFallout : { type: 'float', value: 0.0001 },
+
+        starDensity : { type: 'float', value: 60 },
+        starFactor  : { type: 'float', value: 20 },
+        starColor   : { type: 'vec3', value: new THREE.Color( 0xffffff ) },
+
+        nebCount    : { type: 'int', value: 1 },
+
+        nebArray    : { type: 'mat3', value: new Float32Array( [ 
+            0,0,0, 0,0,0, 0,0,0,
+            0,0,0, 0,0,0, 0,0,0,
+            0,0,0, 0,0,0, 0,0,0,
+         ] ) },
+
+        
+
+        params1: { type :'vec4', value:new Float32Array([0,0,0,0]) },
+        params2: { type :'vec4', value:new Float32Array([0,0,0,0]) },
+        params3: { type :'vec4', value:new Float32Array([0,0,0,0]) },
+        params4: { type :'vec4', value:new Float32Array([0,0,0,0]) },
+        params5: { type :'vec4', value:new Float32Array([0,0,0,0]) },
+        params6: { type :'vec4', value:new Float32Array([0,0,0,0]) },
+    };
+
+    const matConfig = {
+        side            : THREE.BackSide,
+        uniforms        : uniforms,
+        vertexShader    : VERT_SRC,
+        fragmentShader	: FRAG_SRC,
+    }
+
+    const props = {
+        diskColor            : 0xff0000,
+        diskSize             : 1.0,
+        diskFallout          : 64.0,
+        diskLatitude         : 180,      // -180 > 180
+        diskLongitude        : 5,        // -90 > 90
+        
+        starDensity          : 60,
+        starFactor           : 20,
+        starColor            : 0xffffff,
+
+        nebCount             : 3,
+        nebA_Color           : 0x00ff00,
+        nebA_Offset          : [ 0.12345, 0.82123,0.42342 ],
+        nebA_Scale           : 0.72391,
+        nebA_Intensity       : 1.1,
+        nebA_Falloff         : 3.0,
+
+        nebB_Color           : 0x0000ff,
+        nebB_Offset          : [ -0.3, 0.5, 0.1 ],
+        nebB_Scale           : 0.753123,
+        nebB_Intensity       : 1.1,
+        nebB_Falloff         : 3.0,
+
+        nebC_Color           : 0xff0000,
+        nebC_Offset          : [ 0.7, 0.4, 0.1 ],
+        nebC_Scale           : 0.153123,
+        nebC_Intensity       : 1.1,
+        nebC_Falloff         : 3.0,
+
+        update               : ()=>updateParameters( uniforms, props ),
+    }
+
+    props.update();
+    
+    const mat       = new THREE.RawShaderMaterial( matConfig );
+    mat.extensions  = { derivatives : true }; // If not using WebGL2.0 and Want to use dfdx or fwidth, Need to load extension
+    mat.props       = props;
+    return mat;
+}
+
+function updateParameters( uniforms, props ){
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // DISK
+    uniforms.diskSize.value     = props.diskSize * 0.0001;
+    uniforms.diskFallout.value  = props.diskFallout;
+    uniforms.diskColor.value.set( props.diskColor );
+    vec3_fromPolar( props.diskLatitude, props.diskLongitude, uniforms.diskDir.value );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // STARS
+    uniforms.starDensity.value  = props.starDensity;
+    uniforms.starFactor.value   = props.starFactor;
+    uniforms.starColor.value.set( props.starColor );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    uniforms.nebCount.value     = props.nebCount;
+    
+    const col = new THREE.Color();
+    const neb = uniforms.nebArray.value;
+    const ai  = 0;
+    const bi  = 9;
+    const ci  = 18;
+
+    col.setHex( props.nebA_Color )
+    neb[ ai + 0 ] = col.r;
+    neb[ ai + 1 ] = col.g;
+    neb[ ai + 2 ] = col.b;
+    neb[ ai + 3 ] = props.nebA_Offset[0];
+    neb[ ai + 4 ] = props.nebA_Offset[1];
+    neb[ ai + 5 ] = props.nebA_Offset[2];
+    neb[ ai + 6 ] = props.nebA_Scale;
+    neb[ ai + 7 ] = props.nebA_Intensity;
+    neb[ ai + 8 ] = props.nebA_Falloff;
+
+    col.setHex( props.nebB_Color )
+    neb[ bi + 0 ] = col.r;
+    neb[ bi + 1 ] = col.g;
+    neb[ bi + 2 ] = col.b;
+    neb[ bi + 3 ] = props.nebB_Offset[0];
+    neb[ bi + 4 ] = props.nebB_Offset[1];
+    neb[ bi + 5 ] = props.nebB_Offset[2];
+    neb[ bi + 6 ] = props.nebB_Scale;
+    neb[ bi + 7 ] = props.nebB_Intensity;
+    neb[ bi + 8 ] = props.nebB_Falloff;
+
+    col.setHex( props.nebC_Color )
+    neb[ ci + 0 ] = col.r;
+    neb[ ci + 1 ] = col.g;
+    neb[ ci + 2 ] = col.b;
+    neb[ ci + 3 ] = props.nebC_Offset[0];
+    neb[ ci + 4 ] = props.nebC_Offset[1];
+    neb[ ci + 5 ] = props.nebC_Offset[2];
+    neb[ ci + 6 ] = props.nebC_Scale;
+    neb[ ci + 7 ] = props.nebC_Intensity;
+    neb[ ci + 8 ] = props.nebC_Falloff;
+}
+
+
+// #region MATH FUNCTIONS
+function vec3_fromPolar( lon, lat, out=null ) {
+    let phi 	= ( 90 - lat ) * 0.01745329251, // deg 2 rad
+        theta 	= lon * 0.01745329251,          // ( lon + 180 ) * 0.01745329251,
+        sp     	= Math.sin( phi );
+
+    out    = out || [0,0,0];
+    out[0] = -sp * Math.sin( theta );
+    out[1] = Math.cos( phi );
+    out[2] = sp * Math.cos( theta );
+    return out;
+}
+
+function vec3_add( a, b, out=null ){
+    out      = out || a;
+    out[ 0 ] = a[ 0 ] + b[ 0 ];
+    out[ 1 ] = a[ 1 ] + b[ 1 ];
+    out[ 2 ] = a[ 2 ] + b[ 2 ];
+    return out;
+}
+
+function vec3_div( a, b, out=null ){
+    out      = out || a;
+    out[ 0 ] = ( b[ 0 ] !== 0 )? a[ 0 ] / b[ 0 ] : 0;
+    out[ 1 ] = ( b[ 1 ] !== 0 )? a[ 1 ] / b[ 1 ] : 0;
+    out[ 2 ] = ( b[ 2 ] !== 0 )? a[ 2 ] / b[ 2 ] : 0;
+    return out;
+}
+
+function vec3_scale( a, s, out=null ){
+    out      = out || a;
+    out[ 0 ] = a[ 0 ] * s;
+    out[ 1 ] = a[ 1 ] * s;
+    out[ 2 ] = a[ 2 ] * s;
+    return out;
+}
+// #endregion
+
+
+// #region SHADER CODE
+const VERT_SRC = `#version 300 es
+in vec3 position;   // Vertex Position
+in vec2 uv;
+
+uniform mat4 modelMatrix;       // Matrices should be filled in by THREE.JS Automatically.
+uniform mat4 viewMatrix;
+uniform mat4 projectionMatrix;
+
+out vec3 frag_wpos;             // Fragment World Space Position
+out vec2 frag_uv;
+
+////////////////////////////////////////////////////////////////////////
+
+void main() {
+    vec4 wpos       = modelMatrix * vec4( position, 1.0 );
+    frag_wpos       = wpos.xyz;
+    frag_uv         = uv;
+    gl_Position     = projectionMatrix * viewMatrix * wpos;
+}`;
+
+const NOISE4D = `
+vec4 mod289(vec4 x){ return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec4 permute(vec4 x){ return mod289(((x*34.0)+1.0)*x); }
+vec4 taylorInvSqrt(vec4 r){ return 1.79284291400159 - 0.85373472095314 * r; }
+vec4 fade(vec4 t){ return t*t*t*(t*(t*6.0-15.0)+10.0); }
+
+// Classic Perlin noise
+float cnoise(vec4 P){
+  vec4 Pi0 = floor(P); // Integer part for indexing
+  vec4 Pi1 = Pi0 + 1.0; // Integer part + 1
+  Pi0 = mod289(Pi0);
+  Pi1 = mod289(Pi1);
+  vec4 Pf0 = fract(P); // Fractional part for interpolation
+  vec4 Pf1 = Pf0 - 1.0; // Fractional part - 1.0
+  vec4 ix = vec4(Pi0.x, Pi1.x, Pi0.x, Pi1.x);
+  vec4 iy = vec4(Pi0.yy, Pi1.yy);
+  vec4 iz0 = vec4(Pi0.zzzz);
+  vec4 iz1 = vec4(Pi1.zzzz);
+  vec4 iw0 = vec4(Pi0.wwww);
+  vec4 iw1 = vec4(Pi1.wwww);
+
+  vec4 ixy = permute(permute(ix) + iy);
+  vec4 ixy0 = permute(ixy + iz0);
+  vec4 ixy1 = permute(ixy + iz1);
+  vec4 ixy00 = permute(ixy0 + iw0);
+  vec4 ixy01 = permute(ixy0 + iw1);
+  vec4 ixy10 = permute(ixy1 + iw0);
+  vec4 ixy11 = permute(ixy1 + iw1);
+
+  vec4 gx00 = ixy00 * (1.0 / 7.0);
+  vec4 gy00 = floor(gx00) * (1.0 / 7.0);
+  vec4 gz00 = floor(gy00) * (1.0 / 6.0);
+  gx00 = fract(gx00) - 0.5;
+  gy00 = fract(gy00) - 0.5;
+  gz00 = fract(gz00) - 0.5;
+  vec4 gw00 = vec4(0.75) - abs(gx00) - abs(gy00) - abs(gz00);
+  vec4 sw00 = step(gw00, vec4(0.0));
+  gx00 -= sw00 * (step(0.0, gx00) - 0.5);
+  gy00 -= sw00 * (step(0.0, gy00) - 0.5);
+
+  vec4 gx01 = ixy01 * (1.0 / 7.0);
+  vec4 gy01 = floor(gx01) * (1.0 / 7.0);
+  vec4 gz01 = floor(gy01) * (1.0 / 6.0);
+  gx01 = fract(gx01) - 0.5;
+  gy01 = fract(gy01) - 0.5;
+  gz01 = fract(gz01) - 0.5;
+  vec4 gw01 = vec4(0.75) - abs(gx01) - abs(gy01) - abs(gz01);
+  vec4 sw01 = step(gw01, vec4(0.0));
+  gx01 -= sw01 * (step(0.0, gx01) - 0.5);
+  gy01 -= sw01 * (step(0.0, gy01) - 0.5);
+
+  vec4 gx10 = ixy10 * (1.0 / 7.0);
+  vec4 gy10 = floor(gx10) * (1.0 / 7.0);
+  vec4 gz10 = floor(gy10) * (1.0 / 6.0);
+  gx10 = fract(gx10) - 0.5;
+  gy10 = fract(gy10) - 0.5;
+  gz10 = fract(gz10) - 0.5;
+  vec4 gw10 = vec4(0.75) - abs(gx10) - abs(gy10) - abs(gz10);
+  vec4 sw10 = step(gw10, vec4(0.0));
+  gx10 -= sw10 * (step(0.0, gx10) - 0.5);
+  gy10 -= sw10 * (step(0.0, gy10) - 0.5);
+
+  vec4 gx11 = ixy11 * (1.0 / 7.0);
+  vec4 gy11 = floor(gx11) * (1.0 / 7.0);
+  vec4 gz11 = floor(gy11) * (1.0 / 6.0);
+  gx11 = fract(gx11) - 0.5;
+  gy11 = fract(gy11) - 0.5;
+  gz11 = fract(gz11) - 0.5;
+  vec4 gw11 = vec4(0.75) - abs(gx11) - abs(gy11) - abs(gz11);
+  vec4 sw11 = step(gw11, vec4(0.0));
+  gx11 -= sw11 * (step(0.0, gx11) - 0.5);
+  gy11 -= sw11 * (step(0.0, gy11) - 0.5);
+
+  vec4 g0000 = vec4(gx00.x,gy00.x,gz00.x,gw00.x);
+  vec4 g1000 = vec4(gx00.y,gy00.y,gz00.y,gw00.y);
+  vec4 g0100 = vec4(gx00.z,gy00.z,gz00.z,gw00.z);
+  vec4 g1100 = vec4(gx00.w,gy00.w,gz00.w,gw00.w);
+  vec4 g0010 = vec4(gx10.x,gy10.x,gz10.x,gw10.x);
+  vec4 g1010 = vec4(gx10.y,gy10.y,gz10.y,gw10.y);
+  vec4 g0110 = vec4(gx10.z,gy10.z,gz10.z,gw10.z);
+  vec4 g1110 = vec4(gx10.w,gy10.w,gz10.w,gw10.w);
+  vec4 g0001 = vec4(gx01.x,gy01.x,gz01.x,gw01.x);
+  vec4 g1001 = vec4(gx01.y,gy01.y,gz01.y,gw01.y);
+  vec4 g0101 = vec4(gx01.z,gy01.z,gz01.z,gw01.z);
+  vec4 g1101 = vec4(gx01.w,gy01.w,gz01.w,gw01.w);
+  vec4 g0011 = vec4(gx11.x,gy11.x,gz11.x,gw11.x);
+  vec4 g1011 = vec4(gx11.y,gy11.y,gz11.y,gw11.y);
+  vec4 g0111 = vec4(gx11.z,gy11.z,gz11.z,gw11.z);
+  vec4 g1111 = vec4(gx11.w,gy11.w,gz11.w,gw11.w);
+
+  vec4 norm00 = taylorInvSqrt(vec4(dot(g0000, g0000), dot(g0100, g0100), dot(g1000, g1000), dot(g1100, g1100)));
+  g0000 *= norm00.x;
+  g0100 *= norm00.y;
+  g1000 *= norm00.z;
+  g1100 *= norm00.w;
+
+  vec4 norm01 = taylorInvSqrt(vec4(dot(g0001, g0001), dot(g0101, g0101), dot(g1001, g1001), dot(g1101, g1101)));
+  g0001 *= norm01.x;
+  g0101 *= norm01.y;
+  g1001 *= norm01.z;
+  g1101 *= norm01.w;
+
+  vec4 norm10 = taylorInvSqrt(vec4(dot(g0010, g0010), dot(g0110, g0110), dot(g1010, g1010), dot(g1110, g1110)));
+  g0010 *= norm10.x;
+  g0110 *= norm10.y;
+  g1010 *= norm10.z;
+  g1110 *= norm10.w;
+
+  vec4 norm11 = taylorInvSqrt(vec4(dot(g0011, g0011), dot(g0111, g0111), dot(g1011, g1011), dot(g1111, g1111)));
+  g0011 *= norm11.x;
+  g0111 *= norm11.y;
+  g1011 *= norm11.z;
+  g1111 *= norm11.w;
+
+  float n0000 = dot(g0000, Pf0);
+  float n1000 = dot(g1000, vec4(Pf1.x, Pf0.yzw));
+  float n0100 = dot(g0100, vec4(Pf0.x, Pf1.y, Pf0.zw));
+  float n1100 = dot(g1100, vec4(Pf1.xy, Pf0.zw));
+  float n0010 = dot(g0010, vec4(Pf0.xy, Pf1.z, Pf0.w));
+  float n1010 = dot(g1010, vec4(Pf1.x, Pf0.y, Pf1.z, Pf0.w));
+  float n0110 = dot(g0110, vec4(Pf0.x, Pf1.yz, Pf0.w));
+  float n1110 = dot(g1110, vec4(Pf1.xyz, Pf0.w));
+  float n0001 = dot(g0001, vec4(Pf0.xyz, Pf1.w));
+  float n1001 = dot(g1001, vec4(Pf1.x, Pf0.yz, Pf1.w));
+  float n0101 = dot(g0101, vec4(Pf0.x, Pf1.y, Pf0.z, Pf1.w));
+  float n1101 = dot(g1101, vec4(Pf1.xy, Pf0.z, Pf1.w));
+  float n0011 = dot(g0011, vec4(Pf0.xy, Pf1.zw));
+  float n1011 = dot(g1011, vec4(Pf1.x, Pf0.y, Pf1.zw));
+  float n0111 = dot(g0111, vec4(Pf0.x, Pf1.yzw));
+  float n1111 = dot(g1111, Pf1);
+
+  vec4 fade_xyzw = fade(Pf0);
+  vec4 n_0w = mix(vec4(n0000, n1000, n0100, n1100), vec4(n0001, n1001, n0101, n1101), fade_xyzw.w);
+  vec4 n_1w = mix(vec4(n0010, n1010, n0110, n1110), vec4(n0011, n1011, n0111, n1111), fade_xyzw.w);
+  vec4 n_zw = mix(n_0w, n_1w, fade_xyzw.z);
+  vec2 n_yzw = mix(n_zw.xy, n_zw.zw, fade_xyzw.y);
+  float n_xyzw = mix(n_yzw.x, n_yzw.y, fade_xyzw.x);
+  return 2.2 * n_xyzw;
+}
+
+// Classic Perlin noise, periodic version
+float pnoise(vec4 P, vec4 rep){
+  vec4 Pi0 = mod(floor(P), rep); // Integer part modulo rep
+  vec4 Pi1 = mod(Pi0 + 1.0, rep); // Integer part + 1 mod rep
+  Pi0 = mod289(Pi0);
+  Pi1 = mod289(Pi1);
+  vec4 Pf0 = fract(P); // Fractional part for interpolation
+  vec4 Pf1 = Pf0 - 1.0; // Fractional part - 1.0
+  vec4 ix = vec4(Pi0.x, Pi1.x, Pi0.x, Pi1.x);
+  vec4 iy = vec4(Pi0.yy, Pi1.yy);
+  vec4 iz0 = vec4(Pi0.zzzz);
+  vec4 iz1 = vec4(Pi1.zzzz);
+  vec4 iw0 = vec4(Pi0.wwww);
+  vec4 iw1 = vec4(Pi1.wwww);
+
+  vec4 ixy = permute(permute(ix) + iy);
+  vec4 ixy0 = permute(ixy + iz0);
+  vec4 ixy1 = permute(ixy + iz1);
+  vec4 ixy00 = permute(ixy0 + iw0);
+  vec4 ixy01 = permute(ixy0 + iw1);
+  vec4 ixy10 = permute(ixy1 + iw0);
+  vec4 ixy11 = permute(ixy1 + iw1);
+
+  vec4 gx00 = ixy00 * (1.0 / 7.0);
+  vec4 gy00 = floor(gx00) * (1.0 / 7.0);
+  vec4 gz00 = floor(gy00) * (1.0 / 6.0);
+  gx00 = fract(gx00) - 0.5;
+  gy00 = fract(gy00) - 0.5;
+  gz00 = fract(gz00) - 0.5;
+  vec4 gw00 = vec4(0.75) - abs(gx00) - abs(gy00) - abs(gz00);
+  vec4 sw00 = step(gw00, vec4(0.0));
+  gx00 -= sw00 * (step(0.0, gx00) - 0.5);
+  gy00 -= sw00 * (step(0.0, gy00) - 0.5);
+
+  vec4 gx01 = ixy01 * (1.0 / 7.0);
+  vec4 gy01 = floor(gx01) * (1.0 / 7.0);
+  vec4 gz01 = floor(gy01) * (1.0 / 6.0);
+  gx01 = fract(gx01) - 0.5;
+  gy01 = fract(gy01) - 0.5;
+  gz01 = fract(gz01) - 0.5;
+  vec4 gw01 = vec4(0.75) - abs(gx01) - abs(gy01) - abs(gz01);
+  vec4 sw01 = step(gw01, vec4(0.0));
+  gx01 -= sw01 * (step(0.0, gx01) - 0.5);
+  gy01 -= sw01 * (step(0.0, gy01) - 0.5);
+
+  vec4 gx10 = ixy10 * (1.0 / 7.0);
+  vec4 gy10 = floor(gx10) * (1.0 / 7.0);
+  vec4 gz10 = floor(gy10) * (1.0 / 6.0);
+  gx10 = fract(gx10) - 0.5;
+  gy10 = fract(gy10) - 0.5;
+  gz10 = fract(gz10) - 0.5;
+  vec4 gw10 = vec4(0.75) - abs(gx10) - abs(gy10) - abs(gz10);
+  vec4 sw10 = step(gw10, vec4(0.0));
+  gx10 -= sw10 * (step(0.0, gx10) - 0.5);
+  gy10 -= sw10 * (step(0.0, gy10) - 0.5);
+
+  vec4 gx11 = ixy11 * (1.0 / 7.0);
+  vec4 gy11 = floor(gx11) * (1.0 / 7.0);
+  vec4 gz11 = floor(gy11) * (1.0 / 6.0);
+  gx11 = fract(gx11) - 0.5;
+  gy11 = fract(gy11) - 0.5;
+  gz11 = fract(gz11) - 0.5;
+  vec4 gw11 = vec4(0.75) - abs(gx11) - abs(gy11) - abs(gz11);
+  vec4 sw11 = step(gw11, vec4(0.0));
+  gx11 -= sw11 * (step(0.0, gx11) - 0.5);
+  gy11 -= sw11 * (step(0.0, gy11) - 0.5);
+
+  vec4 g0000 = vec4(gx00.x,gy00.x,gz00.x,gw00.x);
+  vec4 g1000 = vec4(gx00.y,gy00.y,gz00.y,gw00.y);
+  vec4 g0100 = vec4(gx00.z,gy00.z,gz00.z,gw00.z);
+  vec4 g1100 = vec4(gx00.w,gy00.w,gz00.w,gw00.w);
+  vec4 g0010 = vec4(gx10.x,gy10.x,gz10.x,gw10.x);
+  vec4 g1010 = vec4(gx10.y,gy10.y,gz10.y,gw10.y);
+  vec4 g0110 = vec4(gx10.z,gy10.z,gz10.z,gw10.z);
+  vec4 g1110 = vec4(gx10.w,gy10.w,gz10.w,gw10.w);
+  vec4 g0001 = vec4(gx01.x,gy01.x,gz01.x,gw01.x);
+  vec4 g1001 = vec4(gx01.y,gy01.y,gz01.y,gw01.y);
+  vec4 g0101 = vec4(gx01.z,gy01.z,gz01.z,gw01.z);
+  vec4 g1101 = vec4(gx01.w,gy01.w,gz01.w,gw01.w);
+  vec4 g0011 = vec4(gx11.x,gy11.x,gz11.x,gw11.x);
+  vec4 g1011 = vec4(gx11.y,gy11.y,gz11.y,gw11.y);
+  vec4 g0111 = vec4(gx11.z,gy11.z,gz11.z,gw11.z);
+  vec4 g1111 = vec4(gx11.w,gy11.w,gz11.w,gw11.w);
+
+  vec4 norm00 = taylorInvSqrt(vec4(dot(g0000, g0000), dot(g0100, g0100), dot(g1000, g1000), dot(g1100, g1100)));
+  g0000 *= norm00.x;
+  g0100 *= norm00.y;
+  g1000 *= norm00.z;
+  g1100 *= norm00.w;
+
+  vec4 norm01 = taylorInvSqrt(vec4(dot(g0001, g0001), dot(g0101, g0101), dot(g1001, g1001), dot(g1101, g1101)));
+  g0001 *= norm01.x;
+  g0101 *= norm01.y;
+  g1001 *= norm01.z;
+  g1101 *= norm01.w;
+
+  vec4 norm10 = taylorInvSqrt(vec4(dot(g0010, g0010), dot(g0110, g0110), dot(g1010, g1010), dot(g1110, g1110)));
+  g0010 *= norm10.x;
+  g0110 *= norm10.y;
+  g1010 *= norm10.z;
+  g1110 *= norm10.w;
+
+  vec4 norm11 = taylorInvSqrt(vec4(dot(g0011, g0011), dot(g0111, g0111), dot(g1011, g1011), dot(g1111, g1111)));
+  g0011 *= norm11.x;
+  g0111 *= norm11.y;
+  g1011 *= norm11.z;
+  g1111 *= norm11.w;
+
+  float n0000 = dot(g0000, Pf0);
+  float n1000 = dot(g1000, vec4(Pf1.x, Pf0.yzw));
+  float n0100 = dot(g0100, vec4(Pf0.x, Pf1.y, Pf0.zw));
+  float n1100 = dot(g1100, vec4(Pf1.xy, Pf0.zw));
+  float n0010 = dot(g0010, vec4(Pf0.xy, Pf1.z, Pf0.w));
+  float n1010 = dot(g1010, vec4(Pf1.x, Pf0.y, Pf1.z, Pf0.w));
+  float n0110 = dot(g0110, vec4(Pf0.x, Pf1.yz, Pf0.w));
+  float n1110 = dot(g1110, vec4(Pf1.xyz, Pf0.w));
+  float n0001 = dot(g0001, vec4(Pf0.xyz, Pf1.w));
+  float n1001 = dot(g1001, vec4(Pf1.x, Pf0.yz, Pf1.w));
+  float n0101 = dot(g0101, vec4(Pf0.x, Pf1.y, Pf0.z, Pf1.w));
+  float n1101 = dot(g1101, vec4(Pf1.xy, Pf0.z, Pf1.w));
+  float n0011 = dot(g0011, vec4(Pf0.xy, Pf1.zw));
+  float n1011 = dot(g1011, vec4(Pf1.x, Pf0.y, Pf1.zw));
+  float n0111 = dot(g0111, vec4(Pf0.x, Pf1.yzw));
+  float n1111 = dot(g1111, Pf1);
+
+  vec4 fade_xyzw = fade(Pf0);
+  vec4 n_0w = mix(vec4(n0000, n1000, n0100, n1100), vec4(n0001, n1001, n0101, n1101), fade_xyzw.w);
+  vec4 n_1w = mix(vec4(n0010, n1010, n0110, n1110), vec4(n0011, n1011, n0111, n1111), fade_xyzw.w);
+  vec4 n_zw = mix(n_0w, n_1w, fade_xyzw.z);
+  vec2 n_yzw = mix(n_zw.xy, n_zw.zw, fade_xyzw.y);
+  float n_xyzw = mix(n_yzw.x, n_yzw.y, fade_xyzw.x);
+  return 2.2 * n_xyzw;
+}`;
+
+const VORONOI = `
+const mat2 myt = mat2(.12121212, .13131313, -.13131313, .12121212);
+const vec2 mys = vec2(1e4, 1e6);
+
+vec2 rhash(vec2 uv) {
+  uv *= myt;
+  uv *= mys;
+  return fract(fract(uv / mys) * uv);
+}
+
+vec3 hash(vec3 p) {
+  return fract(
+      sin(vec3(dot(p, vec3(1.0, 57.0, 113.0)), dot(p, vec3(57.0, 113.0, 1.0)),
+               dot(p, vec3(113.0, 1.0, 57.0)))) *
+      43758.5453);
+}
+
+vec3 voronoi3d(const in vec3 x) {
+  vec3 p = floor(x);
+  vec3 f = fract(x);
+
+  float id = 0.0;
+  vec2 res = vec2(100.0);
+  for (int k = -1; k <= 1; k++) {
+    for (int j = -1; j <= 1; j++) {
+      for (int i = -1; i <= 1; i++) {
+        vec3 b = vec3(float(i), float(j), float(k));
+        vec3 r = vec3(b) - f + hash(p + b);
+        float d = dot(r, r);
+
+        float cond = max(sign(res.x - d), 0.0);
+        float nCond = 1.0 - cond;
+
+        float cond2 = nCond * max(sign(res.y - d), 0.0);
+        float nCond2 = 1.0 - cond2;
+
+        id = (dot(p + b, vec3(1.0, 57.0, 113.0)) * cond) + (id * nCond);
+        res = vec2(d, res.x) * cond + res * nCond;
+
+        res.y = cond2 * d + nCond2 * res.y;
+      }
+    }
+  }
+
+  return vec3(sqrt(res), abs(id));
+}`;
+
+const FRAG_SRC = `#version 300 es
+precision mediump float;
+
+////////////////////////////////////////////////////////////////////////
+
+out     vec4 out_color;
+in      vec3 frag_wpos;
+in      vec2 frag_uv;
+
+uniform vec3  diskColor;   //   = vec3( 1.0, 0.0, 0.0 );
+uniform vec3  diskDir;     //    = normalize( vec3( 0.0, 0.0, -1.0 ) );
+uniform float diskSize;    //   = 1.0 * 0.0001; //0.01 * 0.0001 + 0.0001;   // rand.random() * 0.0001 + 0.0001,
+uniform float diskFallout; // = 0.19842 * 16.0 + 8.0;    // rand.random() * 16.0 + 8.0
+
+uniform float starDensity;
+uniform float starFactor;
+uniform vec3  starColor;
+
+uniform int nebCount;
+uniform mat3[3] nebArray;
+// 0,1,2 = color
+// 3,4,5 = offset
+// 6 = Scale
+// 7 = Intensity
+// 8 = Falloff
+
+const float nebScale      = 0.72391; // 0.94782 * 0.5 + 0.25;  // rand.random() * 0.5 + 0.25,
+const float nebIntensity  = 1.1; //0.99223 * 0.2 + 0.9;   // rand.random() * 0.2 + 0.9,
+const float nebFalloff    = 3.0; // 0.00001 * 3.0 + 3.0;   // rand.random() * 3.0 + 3.0,
+const vec3  nebColor      = vec3( 0.3, 1.0, 0.3 ); // 
+const vec3  nebOffset     = vec3(
+    0.12345 * 2000.0 - 1000.0,
+    0.82123 * 2000.0 - 1000.0,
+    0.42342 * 2000.0 - 1000.0
+);
+
+////////////////////////////////////////////////////////////////////////
+// MISC
+vec4 DstBlend( vec4 src, vec4 dst ){
+    return src * ( 1.0 - dst.a ) + dst * dst.a;
+    return vec4(
+        src.rgb * src.a + dst.rgb * ( 1.0 - src.a ),
+        dst.a //src.a * 0.0 + dst * 1.0
+    );
+}
+
+////////////////////////////////////////////////////////////////////////
+// STARS
+
+${VORONOI}
+
+vec3 starField( vec3 norm ){
+    vec3 vn = voronoi3d( norm * starDensity );
+    float n = 1.0 - clamp( 0.0, 1.0, vn.x );
+    return pow( n, starFactor ) * starColor;
+}
+
+////////////////////////////////////////////////////////////////////////
+// NEBULA
+
+${NOISE4D}
+
+float noise(vec3 p) { return 0.5 * cnoise(vec4(p, 0)) + 0.5; }
+float nebulaNoise( vec3 p ){
+    vec3 displace;
+    const int steps = 6;
+    float scale     = pow( 2.0, float( steps ) );
+    
+    for( int i=0; i < steps; i++ ){
+        displace = vec3(
+            noise( p.xyz * scale + displace ),
+            noise( p.yzx * scale + displace ),
+            noise( p.zxy * scale + displace )
+        );
+        scale *= 0.5;
+    }
+
+    return noise( p * scale + displace );    
+}
+
+vec4 nebulaColor( vec3 norm ){
+    vec3 snorm = norm * nebScale;
+    float n    = min( 1.0, nebulaNoise( snorm + nebOffset ) * nebIntensity );
+    n          = pow( n, nebFalloff );
+    return vec4( nebColor, n );
+}
+
+vec4 nebula( vec3 norm, int cnt ){
+    vec3  snorm;
+    vec3  nebOffset;
+    vec3  nebColor;
+    float nebScale;
+    float nebIntensity;
+    float nebFallout;
+    float n;
+    vec4  rtn = vec4( 0.0, 0.0, 0.0, 0.0 );
+
+    for( int i=0; i < cnt; i++ ){        
+        nebScale     = nebArray[ i ][ 2 ].x;
+        nebIntensity = nebArray[ i ][ 2 ].y;
+        nebFallout   = nebArray[ i ][ 2 ].z;
+        nebOffset    = nebArray[ i ][ 1 ];
+        nebColor     = nebArray[ i ][ 0 ];
+
+        snorm        = norm * nebScale;
+        n            = min( 1.0, nebulaNoise( snorm + nebOffset ) * nebIntensity );
+        n            = pow( n, nebFalloff );
+        rtn.rgb     += nebColor * n;
+        rtn.a       += n;
+    }
+
+    return rtn;
+}
+
+////////////////////////////////////////////////////////////////////////
+// SUN
+vec4 sunGradient( vec3 norm ){
+    float d = clamp( dot( norm, diskDir ), 0.0, 1.0 );
+    float c = smoothstep( 1.0 - diskSize * 32.0, 1.0 - diskSize, d );
+    c      += pow( d, diskFallout ) * 0.5;
+
+    return vec4( mix( diskColor, vec3( 1.0 ), c ), c );
+}
+
+
+
+////////////////////////////////////////////////////////////////////////
+void main(){
+    vec3 norm     = normalize( frag_wpos );
+    out_color     = vec4( 0.0, 0.0, 0.0, 1.0 );
+    
+    out_color.rgb = starField( norm );
+    //out_color     = DstBlend( out_color, nebulaColor( norm ) );
+    out_color     = DstBlend( out_color, nebula( norm, nebCount ) );
+    out_color     = DstBlend( out_color, sunGradient( norm ) );
+    //out_color     = nebula( norm, nebCount );
+}`;
+// #endregion
+
+</script></body></html>

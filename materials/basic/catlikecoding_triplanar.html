@@ -1,0 +1,150 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="/import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../../lib/Starter.js';
+import Suzanne              from '../lib/suzanne.js';
+import Cube                 from '../../lib/meshes/Cube.js';
+import Sphere               from '../../lib/meshes/Sphere.js';
+
+let App;
+let Debug = {};
+let Ref   = {};
+
+window.addEventListener( "load", async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App = new Starter( { webgl2:false, grid:true, lights:true } );
+    App.setCamera( 20, 20, 5, [0, 0.5, 0] );
+    App.onRender = onRender;
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const tex  = new THREE.TextureLoader().load( '../../assets/imgs/checker_map.jpg' );
+    tex.flipY  = true;
+    tex.wrapS  = THREE.RepeatWrapping;
+    tex.wrapT  = THREE.RepeatWrapping;
+
+    const mat  = customMaterial( tex );
+    App.add( Cube.floor( { mat, pos:[2,0,0] } ) );
+    App.add( Sphere( { mat, pos:[-2,0.5,0], radius:0.5 } ) );
+    App.add( await Suzanne( mat ) );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.render();
+});
+
+function onRender( dt, et ){
+}
+
+function customMaterial( tex01 ){
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        // transparent 	: true, 
+        // side            : THREE.DoubleSide,
+        // lights          : true,
+
+        uniforms        : { 
+            tex01 : { type :'sampler2D', value: tex01 },
+        },
+
+        extensions      : { 
+            derivatives : true
+        },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        void main(){
+            vec4 wPos 	        = modelMatrix * vec4( position, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;                    // View Space
+            
+            fragUV              = uv;
+            fragWPos            = wPos.xyz;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position			= projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+        
+        uniform sampler2D tex01;
+        uniform vec3 cameraPosition;
+
+        in  vec3    fragVPos;
+        in  vec3    fragWPos;
+        in  vec3    fragNorm;
+        in  vec2    fragUV;
+        out vec4    outColor;
+
+        // #####################################################################
+
+        // Use this to view the Triplaner Weight Distribution, Only for debugging
+        vec3 normWeights( vec3 norm, float offset, float ex ){
+            vec3 n = abs( norm );
+            n      = clamp( n - offset, 0.0, 1.0 ); // Offsets to tighten up the blending 0 to 0.5
+            n      = pow( n, vec3( ex ) ); // 1 to 8, Removes more of the blur to really tighten up the blending
+            n      = n / ( n.x + n.y + n.z );
+
+            return n;
+        }
+
+        // https://catlikecoding.com/unity/tutorials/advanced-rendering/triplanar-mapping/
+        vec3 triplanar( sampler2D tex, vec3 pos, vec3 norm, float blendOffset, float blendExp ){
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Blending Normal
+            vec3 bNorm = abs( norm );
+            bNorm      = clamp( bNorm - blendOffset, 0.0, 1.0 );  // Offsets to tighten up the blending 0 to 0.5
+            bNorm      = pow( bNorm, vec3( blendExp ) );          // 1 to 8, Removes more of the blur to really tighten up the blending
+            bNorm      = bNorm / ( bNorm.x + bNorm.y + bNorm.z );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Setup Planar UVs
+            vec2 uvx = pos.zy;
+            vec2 uvy = pos.xz;
+            vec2 uvz = pos.xy;
+
+            // fix mirroring: catlikecoding didn't work well, had to change a few bits to
+            // make the cube render out the axes correctly
+            if( norm.x > 0.0 ) uvx.x = -uvx.x;
+            if( norm.y > 0.0 ) uvy.y = -uvy.y;
+            if( norm.z < 0.0 ) uvz.x = -uvz.x; 
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            vec3 xColor = texture( tex, uvx ).rgb;
+            vec3 yColor = texture( tex, uvy ).rgb;
+            vec3 zColor = texture( tex, uvz ).rgb;
+            
+            return 
+                xColor * bNorm.x + 
+                yColor * bNorm.y + 
+                zColor * bNorm.z;
+        }
+
+        // #####################################################################
+        void main(){
+            //----------------------------
+            vec3 norm = normalize( fragNorm ); // * 0.5 + 0.5;
+            //outColor = vec4( norm , 1.0);
+            
+            //----------------------------
+            //vec4 col  = texture( tex01, fragWPos.xz );
+            //outColor = vec4( col.rgb , 1.0);
+
+            //----------------------------
+            //outColor = texture( tex01, fragUV );
+            //outColor = vec4( normWeights( norm, 0.5, 8.0 ), 1.0 ); // Debug Visualize the Weights
+            outColor = vec4( triplanar( tex01, fragWPos, norm, 0.5, 8.0 ), 1.0 );
+        }`
+    });
+
+    return mat;
+}
+
+</script></body></html>
