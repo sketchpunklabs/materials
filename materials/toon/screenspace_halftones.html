@@ -1,0 +1,208 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+    import Starter, { THREE }   from '../../lib/Starter.js';
+    import Suzanne              from '../lib/Suzanne.js';
+    import Cube                 from '../../lib/meshes/Cube.js';
+    import Sphere               from '../../lib/meshes/Sphere.js';
+    
+    let App;
+    let Debug = {};
+    let Ref   = {};
+    
+    window.addEventListener( "load", async _=>{
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        App = new Starter( { webgl2:false, grid:true, lights:true } );
+        App.setCamera( 20, 20, 2, [0, 0.5, 0] );
+        App.onRender = onRender;
+    
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        const mat  = customMaterial();
+        mat.setScreenSize( App.getRendererSize() );
+        mat.setUVScale( 110 );
+
+        App.add( Cube.floor( { mat, pos:[2,0,0], scl:1 } ) );
+        App.add( Sphere( { mat, pos:[-2,0.5,0], radius:0.5, scl:1 } ) );
+        App.add( await Suzanne( mat ) );
+    
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        App.render();
+    });
+    
+    function onRender( dt, et ){
+    }
+    
+    // https://gist.github.com/KenneyNL/802d7107fbe9bf42b16ec05b43b58079
+    function customMaterial( baseColor=0xa0a0a0, useLowPoly=false ){
+        const mat = new THREE.RawShaderMaterial({
+            depthTest       : true,
+            // transparent 	: true, 
+            // side         : THREE.DoubleSide,
+            // lights       : true,
+    
+            uniforms        : {
+                screenSize     : { type: 'vec2',  value: [100,100 ] },
+                uvScale        : { type: 'float', value: 140 },
+                specularPow    : { type: 'float', value: 50 },
+                shadowStrength : { type: 'float', value: 0.4 },
+            },
+    
+            extensions      : { 
+                derivatives : true
+            },
+    
+            vertexShader    : `#version 300 es
+            in	vec3    position;
+            in  vec3    normal;
+            in	vec2    uv;
+            
+            uniform     mat4    modelMatrix;
+            uniform     mat4    viewMatrix;
+            uniform     mat4    projectionMatrix;
+
+            uniform     vec2    screenSize;
+    
+            out vec3    fragWPos;  // World Space Position
+            out vec3    fragNorm;
+            out vec2    fragUV;
+            out vec2    screenUV;
+            
+            void main(){
+                // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                vec4 wPos           = modelMatrix * vec4( position, 1.0 );  // World Space
+                vec4 vPos           = viewMatrix * wPos;                    // View Space
+                
+                fragUV              = uv;
+                fragWPos            = wPos.xyz;
+                fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+                
+                gl_Position = projectionMatrix * vPos;
+
+                // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                screenUV.xy	 = gl_Position.xy / gl_Position.w;
+                screenUV.x 	*= screenSize.x / screenSize.y;	    // Fix X Stretch
+                screenUV.xy	 = screenUV.xy * 0.5 + 0.5;			// To -1,1 to 0,1
+            }`,
+    
+            fragmentShader  : `#version 300 es
+            precision mediump float;
+            
+            ${ ( useLowPoly )? '#define LOWPOLY':'' }
+
+            uniform float uvScale;
+            uniform float specularPow;
+            uniform float shadowStrength;
+            uniform vec3  cameraPosition;
+    
+            in  vec3    fragWPos;
+            in  vec3    fragNorm;
+            in  vec2    fragUV;
+            in  vec2    screenUV;
+            out vec4    outColor;
+            
+            // #####################################################################
+
+            vec3 rgb( int c ){
+                return vec3(
+                    float( ( c >> 16 ) & 0xff ) * 0.00392156863,
+                    float( ( c >> 8 ) & 0xff ) * 0.00392156863,
+                    float( c & 0xff ) * 0.00392156863
+                );
+            }
+
+            struct DotRamp{
+                vec3 color_a;
+                vec3 color_b;
+                float t;
+            };
+
+            void color_dot_ramp2( vec3[5] color, float[5] wgt, float t, float feather, int i, out DotRamp dr ){
+                for( i; i > 0; i-- ){
+                    if( ( wgt[ i ] ) <= t ){
+                        dr.color_a	= color[ i-1 ];
+                        dr.color_b	= color[ i ];
+                        dr.t		= clamp( ( t - wgt[i] ) / feather, 0.0, 1.0 );
+                        return;
+                    }
+                }
+                dr.color_a	= color[ 0 ];
+                dr.color_b	= color[ 0 ];
+                dr.t		= 0.0;
+            }
+
+            float ease( float x ){ return 3.0 * x * x - 2.0 * x * x * x; }
+
+            // #####################################################################
+            const vec3 lightPos = vec3( 4.0, 1.8, 5.0 );
+
+            void main(){
+                // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                vec3 norm 			= normalize( fragNorm );					// Must normalized, Since it has been interpolated
+                vec3 dir_light		= normalize( lightPos - fragWPos );		    // Frag to Light Directiom
+                vec3 dir_cam		= normalize( cameraPosition - fragWPos );	// Frag tp Camera Direction
+                float d_lite		= dot( dir_light, norm );
+                float d_lite_c	    = clamp( d_lite, 0.0, 1.0 );	// Clamp Light
+                float d_lite_a	    = d_lite * 0.5 + 0.5;			// Remap Light from -1,1 to 0,1
+
+                // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                //float uv_scale		= 140.0;
+
+                // Experiment with changing scale based on distance from camera
+                //uv_scale = mix( 100.0, 180.0, clamp( length( frag_cam_pos - frag_wpos ) / 6.0, 0.0, 1.0 ) );
+
+                vec2 rot_uv			= mat2( 0.707, -0.707, 0.707, 0.707 ) * screenUV;	// Rotate Screen UV by 45d
+                vec2 cell_pos		= fract( uvScale * rot_uv ) * 2.0 - 1.0;			// Scale UV, Cell Pos, Remap to -1,1
+
+                float radius_max	= 2.0;					// Total Radius for Halftone Dots.
+                float cell_pos_len	= length( cell_pos );	// Distance from Cell Center
+
+                float radius_rng	= 0.0;					// What the Radius Range is after some math
+                float radius_step	= 0.0;					// Define the inner or outer part of the halftone circle.
+
+                //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                // COLOR RAMP
+
+                vec3	ramp_col[5]	= vec3[]( rgb(0x1D212A), rgb(0x2A4B53), rgb(0x81FFE9), vec3(.0), vec3(.0) );	
+                float	ramp_wgt[5]	= float[]( 0.0, 0.35, 0.75, .0, .0 );
+
+                // Get the Color based on the Angle of the Light in relation to normal
+                DotRamp dotramp;
+                color_dot_ramp2( ramp_col, ramp_wgt, d_lite_c, 0.17, 2, dotramp );
+
+                radius_rng		= radius_max * pow( 1.0 - dotramp.t, 1.4 );
+                radius_step		= step( radius_rng, cell_pos_len );
+                outColor.rgb	= mix( dotramp.color_a, dotramp.color_b, radius_step );
+
+                //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                // SPECULAR COLOR
+
+                vec3 half_dir	= normalize( dir_light + dir_cam ); 		// Direction between Light and Camera
+                float NdH		= clamp( dot( norm, half_dir ), 0.0, 1.0 );	// Angle of Norm to Half
+                float gloss		= specularPow; //50.0;						// How Much Power to Raise Specular Light angle
+                float spec		= pow( NdH, gloss );
+                
+                radius_rng		= radius_max * ease( spec );				// Use an ease function to curve the light results
+                radius_step		= step( radius_rng, cell_pos_len );
+                outColor.rgb	+= vec3( 1.0 - radius_step );				// Invert the step to make specular into white
+                
+                //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                // DIRECTIONAL RIM
+                float dot_nl	= d_lite * -1.0;
+                float rim_dot	= 1.0 - dot( dir_cam, norm ) ;
+                float rim_rng	= smoothstep( 0.5, 0.9, rim_dot * pow( dot_nl, 0.03) );
+
+                //float shadow_strength = 0.4;
+
+                radius_rng		= radius_max * rim_rng;
+                radius_step		= 1.0 - step( radius_rng, cell_pos_len );
+                outColor.rgb	= mix( outColor.rgb, outColor.rgb * shadowStrength, radius_step );
+            }`
+        });
+
+        mat.setScreenSize       = v=>{ mat.uniforms.screenSize.value = v; };
+        mat.setUVScale          = v=>{ mat.uniforms.uvScale.value = v; };
+        mat.setSpecularPow      = v=>{ mat.uniforms.specularPow.value = v; };
+        mat.setShadowStrength   = v=>{ mat.uniforms.shadowStrength.value = v; };
+    
+        return mat;
+    }
+    
+    </script></body></html>
