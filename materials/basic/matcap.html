@@ -1,0 +1,131 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../../lib/Starter.js';
+import Suzanne              from '../lib/Suzanne.js';
+import Cube                 from '../../lib/meshes/Cube.js';
+import Sphere               from '../../lib/meshes/Sphere.js';
+
+let App;
+let Debug = {};
+let Ref   = {};
+
+window.addEventListener( "load", async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App = new Starter( { webgl2:false, grid:true, lights:true } );
+    App.setCamera( 20, 20, 5, [0, 0.5, 0] );
+    App.onRender = onRender;
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const tex  = new THREE.TextureLoader().load( '../../assets/imgs/matcap/matcap_002.jpg' );
+    tex.flipY  = true;
+    tex.wrapS  = THREE.ClampToEdgeWrapping; //THREE.RepeatWrapping;
+    tex.wrapT  = THREE.ClampToEdgeWrapping; //THREE.RepeatWrapping;
+
+    const mat  = customMaterial( tex );
+    App.add( Cube.floor( { mat, pos:[2,0,0] } ) );
+    App.add( Sphere( { mat, pos:[-2,0.5,0], radius:0.5 } ) );
+    App.add( await Suzanne( mat ) );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.render();
+});
+
+function onRender( dt, et ){
+}
+
+function customMaterial( tex01 ){
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        // transparent 	: true, 
+        // side            : THREE.DoubleSide,
+        // lights          : true,
+
+        uniforms        : { 
+            tex01 : { type :'sampler2D', value: tex01 },
+        },
+
+        extensions      : { 
+            derivatives : true
+        },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        void main(){
+            vec4 wPos 	        = modelMatrix * vec4( position, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;                    // View Space
+            
+            fragUV              = uv;
+            fragWPos            = wPos.xyz;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position			= projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+        
+        uniform sampler2D tex01;
+        uniform vec3 cameraPosition;
+
+        in  vec3    fragWPos;
+        in  vec3    fragNorm;
+        in  vec2    fragUV;
+        out vec4    outColor;
+
+        // #####################################################################
+        void main(){
+            // ----------------------------
+            vec3 norm   = normalize( fragNorm );
+
+            // ----------------------------
+            // https://www.clicktorelease.com/blog/creating-spherical-environment-mapping-shader/
+            // This creates a pinch artifact in the back of meshes
+            //vec3 camDir	= normalize( fragWPos - cameraPosition );
+            //vec3 refDir 	= camDir - 2.0 * dot( norm, camDir ) * norm; // Reflect Equation
+		    //vec3 refDir 	= reflect( camDir, norm );	                 // Or use built in Equation
+
+            //float m = 2.0 * sqrt( pow( refDir.x, 2.0 ) + pow( refDir.y, 2.0 ) + pow( refDir.z + 1.0, 2.0 ) );
+            //float m = 2.0 * sqrt( refDir.x*refDir.x + refDir.y*refDir.y + (refDir.z+1.0)*(refDir.z+1.0) );
+            //float m = 2.8284271247461903 * sqrt( refDir.z + 1.0 );
+            //vec2 uv = refDir.xy / m + 0.5;
+
+            // ----------------------------
+            // ThreeJS's way
+            // https://github.com/mrdoob/three.js/blob/master/src/renderers/shaders/ShaderLib/meshmatcap.glsl.js#L82
+
+            /* NOTE:
+            Trying to understand the math, its trying to create an 3 direction axes with the cam direction being forward
+            First is gets a perpendicular direction of the camera by rotating by -90 degrees then projected to XZ plane, creating a Right Axis
+            Then using cross product to get the Up Axis.
+            Since eveything is normalized, can determing the XY position the meshe's normal is within this Axes, produces values -1 to 1
+            Then Remapping the values from -1 to 1 into 0 to 1 for UV goodness.
+            */
+
+            vec3 camDir = normalize( cameraPosition );
+	        vec3 x      = normalize( vec3( camDir.z, 0.0, -camDir.x ) );        // NOTE: This looks like a -90 YAxis rotation then projected down to XZ plane?
+	        vec3 y      = cross( camDir, x );
+	        vec2 uv     = vec2( dot( x, norm ), dot( y, norm ) ) * 0.495 + 0.5; // 0.495 to remove artifacts caused by undersized matcap disks
+
+            // ----------------------------
+            // Very simple, but the lighting becomes very static & doesn't seem to move in relation to the camera
+            //vec2 uv = norm.xy * 0.5 + vec2( 0.5 );
+
+            // ----------------------------
+            outColor = texture( tex01, uv ); //* base_color;
+        }`
+    });
+
+    return mat;
+}
+
+</script></body></html>
