@@ -1,0 +1,183 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../../lib/Starter.js';
+
+let App;
+let Ref = {}
+
+window.addEventListener( 'load', async _=>{
+	//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App = new Starter( { webgl2:true, grid:true } );
+	App.setCamera( 0, 20, 20, [0,2.5,0] ).render();
+
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const tex  = new THREE.TextureLoader().load( '../../assets/imgs/textures/teufelsberg_inner.jpg' );
+    //tex.flipY  = true;
+    // Use repeat for using lower mip levels without artifacts
+    tex.wrapS  = THREE.RepeatWrapping; //THREE.ClampToEdgeWrapping; //
+    tex.wrapT  = THREE.RepeatWrapping; //THREE.ClampToEdgeWrapping; //
+
+    const mipGrad = 0.0;
+
+	const mat  = customMaterialEnv( tex, mipGrad );
+    const mesh = new THREE.Mesh( new THREE.SphereGeometry( 80, 32, 16 ), mat );
+    App.add( mesh );
+
+    const other = new THREE.Mesh( new THREE.SphereGeometry( 3, 32, 16 ), customMaterialRef( tex, mipGrad ) );
+    other.position.set( 0,3.5,0 );
+    App.add( other );
+});
+
+
+function customMaterialEnv( tex, mipGrad=0 ){
+    const matConfig = {
+        side            : THREE.BackSide, //THREE.DoubleSide,
+        // transparent 	: true, 
+        // lights       : true,
+
+        uniforms        : {
+            texEnv  : { type:'sampler2D', value: tex },
+            mipGrad : { type:'float',     value: mipGrad }
+        },
+        //extensions      : { derivatives : true },
+
+        vertexShader    : `#version 300 es
+        in vec3 position;
+        in vec3 normal;
+
+        uniform mat4 modelMatrix;       // Matrices should be filled in by THREE.JS Automatically.
+        uniform mat4 viewMatrix;
+        uniform mat4 projectionMatrix;
+
+        out vec3 fragWPos;
+        out vec3 fragNorm;
+
+        ////////////////////////////////////////////////////////////////////////
+
+        void main() {
+            vec4 wpos   = modelMatrix * vec4( position, 1.0 );
+            fragWPos    = wpos.xyz;
+            fragNorm    = normal;
+            gl_Position = projectionMatrix * viewMatrix * wpos;
+        }`,
+
+        fragmentShader	: `#version 300 es
+        precision mediump float;
+
+        out     vec4 outColor;
+        in      vec3 fragWPos;
+        in      vec3 fragNorm;
+
+        uniform sampler2D texEnv;  // Enviroment
+        uniform float     mipGrad;
+
+        ////////////////////////////////////////////////////////////////////////
+
+        // Equirectangular, converts Normal Direction to UV Coords
+        vec2 equirectangular( vec3 norm ){
+            float lon   = atan( norm.z, norm.x );
+            float lat   = acos( norm.y );
+            vec2 uv     = vec2( lon, lat ) * ( 1.0 / 3.1415926535897932384626433832795 );
+            uv.x        = 1.0 - ( uv.x * 0.5 + 0.5 ); // Remap and reverse Lon
+            return uv;
+        }
+        
+        ////////////////////////////////////////////////////////////////////////
+
+        void main(){
+            vec3 norm   = normalize( fragNorm );
+            outColor    = vec4( norm, 1.0 );
+
+            /* BASIC 
+            outColor    = texture( texEnv, equirectangular( norm ) );
+            */
+
+            /* SELECT MIP LEVELS */
+            ivec2 tSize  = textureSize( texEnv, 0 );
+            float maxMip = 1.0 + floor( log2( float( max( tSize.x, tSize.y ) ) ) );  // Guess how many Mip Levels
+            outColor     = textureLod( texEnv, equirectangular( norm ), maxMip * mipGrad );
+        }`,
+    }
+
+    return new THREE.RawShaderMaterial( matConfig );
+}
+
+
+function customMaterialRef( tex, mipGrad=0 ){
+    const matConfig = {
+        side            : THREE.FrontSide, //THREE.DoubleSide,
+        // transparent 	: true, 
+        // lights       : true,
+
+        uniforms        : {
+            texEnv  : { type:'sampler2D', value: tex },
+            mipGrad : { type:'float',     value: mipGrad }
+        },
+        //extensions      : { derivatives : true },
+
+        vertexShader    : `#version 300 es
+        in vec3 position;
+        in vec3 normal;
+
+        uniform mat4 modelMatrix;       // Matrices should be filled in by THREE.JS Automatically.
+        uniform mat4 viewMatrix;
+        uniform mat4 projectionMatrix;
+
+        out vec3 fragWPos;
+        out vec3 fragNorm;
+
+        ////////////////////////////////////////////////////////////////////////
+
+        void main() {
+            vec4 wpos   = modelMatrix * vec4( position, 1.0 );
+            fragWPos    = wpos.xyz;
+            fragNorm    = normal;
+            gl_Position = projectionMatrix * viewMatrix * wpos;
+        }`,
+
+        fragmentShader	: `#version 300 es
+        precision mediump float;
+
+        out     vec4 outColor;
+        in      vec3 fragWPos;
+        in      vec3 fragNorm;
+
+        uniform vec3      cameraPosition;
+        uniform sampler2D texEnv;  // Enviroment
+        uniform float     mipGrad;
+
+        ////////////////////////////////////////////////////////////////////////
+
+        // Equirectangular, converts Normal Direction to UV Coords
+        vec2 equirectangular( vec3 norm ){
+            float lon   = atan( norm.z, norm.x );
+            float lat   = acos( norm.y );
+            vec2 uv     = vec2( lon, lat ) * ( 1.0 / 3.1415926535897932384626433832795 );
+            uv.x        = 1.0 - ( uv.x * 0.5 + 0.5 ); // Remap and reverse Lon
+            return uv;
+        }
+        
+        ////////////////////////////////////////////////////////////////////////
+
+        void main(){
+            vec3 norm   = normalize( fragNorm );
+            outColor    = vec4( norm, 1.0 );
+
+            /* REFLECTION ONLY */
+            // Get Reflection Direction between the Frag normal and direction to cam, negate to get reverse direction
+            vec3 camDir     = normalize( cameraPosition - fragWPos );
+            vec3 camDirRef  = reflect( -camDir, norm ); // or -camDir - 2.0 * dot( norm, -camDir ) * norm
+
+            ivec2 tSize     = textureSize( texEnv, 0 );
+            float maxMip    = 1.0 + floor( log2( float( max( tSize.x, tSize.y ) ) ) );  // Guess how many Mip Levels
+
+            outColor        = textureLod( texEnv, equirectangular( camDirRef ), maxMip * mipGrad );
+        }`,
+    }
+
+    return new THREE.RawShaderMaterial( matConfig );
+}
+
+
+// #endregion
+
+</script></body></html>
