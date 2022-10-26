@@ -1,0 +1,99 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../../lib/Starter.js';
+
+let App;
+let Debug = {};
+
+window.addEventListener( "load", _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App = new Starter( { webgl2:true, grid:true } );
+	App.setCamera( 0, 20, 15, [0,0,0] ).render();
+
+    const texCube = new THREE.CubeTextureLoader()
+        .setPath( '../../assets/imgs/cubemap/' )
+        .load( [
+            'test_xp.jpg',
+            'test_xn.jpg',
+            'test_yp.jpg',
+            'test_yn.jpg',
+            'test_zp.jpg',
+            'test_zn.jpg'
+            // 'posx.jpg',
+            // 'negx.jpg',
+            // 'posy.jpg',
+            // 'negy.jpg',
+            // 'posz.jpg',
+            // 'negz.jpg'
+        ] );
+
+        texCube.flipY = false;
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const geo  = new THREE.BoxGeometry( 5, 5, 5 );
+    const mesh = new THREE.Mesh( geo, customMaterial( texCube ) );
+    App.add( mesh );
+});
+
+function customMaterial( texCube ){
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        // transparent 	: true, 
+        side            : THREE.BackSide,
+        // lights          : true,
+
+        uniforms        : { 
+            texCube : { type :'samplerCube', value: texCube },
+        },
+
+        extensions      : { 
+            derivatives : true
+        },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        void main(){
+            vec4 wPos 	        = modelMatrix * vec4( position, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;                    // View Space
+            
+            fragUV              = uv;
+            fragWPos            = wPos.xyz;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position			= projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+        
+        uniform samplerCube texCube;
+        uniform vec3 cameraPosition;
+
+        in  vec3    fragWPos;
+        in  vec3    fragNorm;
+        in  vec2    fragUV;
+        out vec4    outColor;
+
+        // #####################################################################
+        void main(){
+            vec3 dir = normalize( fragWPos );
+            dir     *= vec3( 1.0, 1.0, -1.0 ); // Can fix textures by doing this if needed
+
+            outColor = texture( texCube, dir );
+        }`
+    });
+
+    return mat;
+}
+
+</script></body></html>
