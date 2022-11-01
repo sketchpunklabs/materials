@@ -1,0 +1,39 @@
+// lots of chunks, noise, fresnel, might be better way to get normal matrix, etc.
+https://github.com/pmndrs/lamina/tree/main/src
+
+https://github.com/ashima/webgl-noise/tree/master/src
+
+https://www.ronja-tutorials.com/post/029-tiling-noise/
+
+https://iquilezles.org/www/articles/smoothvoronoi/smoothvoronoi.htm
+https://iquilezles.org/www/articles/voronoilines/voronoilines.htm
+Voronoi - hierarchica
+https://www.shadertoy.com/view/Xll3zX
+Voronoi - smooth 
+https://www.shadertoy.com/view/ldB3zc
+Worley Noise
+https://www.shadertoy.com/view/llS3RK
+Rounder Voronoi Edge Distance 
+https://www.shadertoy.com/view/ld3yRn
+
+Triangle Voronoi
+https://www.shadertoy.com/view/ss3fW4
+
+How to play and warp noise to make patterns
+https://thebookofshaders.com/11/
+
+Various types of Voronoi & Examples
+https://thebookofshaders.com/12/
+
+Cloudy & Various FBM  examples
+https://thebookofshaders.com/13/
+
+
+https://joyrok.com/SDFs-Part-Two
+
+
+const float PI = 3.141592653;
+vec2 map_from_sphere(vec3 p){
+    p = normalize(p);
+    return vec2(atan(p.x,p.y)/PI/2.+0.5, acos(p.z)/PI/2.+0.5);
+}

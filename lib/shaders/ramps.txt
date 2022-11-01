@@ -1,0 +1,189 @@
+ 
+ 
+// ########################################
+WORKING
+
+//vec3 ramp_col[3]    = vec3[]( rgb(0x1D212A), rgb(0x2A4B53), rgb(0x81FFE9) );
+vec3 ramp_col[3]    = vec3[]( rgb(0x3A3A3A), rgb(0x1D212A), rgb(0x2A4B53) );
+float ramp_wgt[3]   = float[]( 0.0, 0.427386, 0.78 );
+
+// outColor.rgb = rampStep( d, ramp_col, ramp_wgt, 3 );
+outColor.rgb = rampLerp( d, ramp_col, ramp_wgt, 3 );
+
+vec3 rampStep( float t, vec3[3] color, float[3] wgt, int cnt ){
+    if( t >= wgt[ cnt-1 ] ) return color[ cnt-1 ]; // Greater ten final check.
+
+    for( int i=1; i < cnt; i++ ){
+        if( wgt[ i ] > t ) return color[ i-1 ];
+    }
+    return color[ 0 ];
+}
+
+vec3 rampLerp( float t, vec3 color[3], float wgt[3], int cnt ){
+    if( t >= wgt[ cnt-1 ] ) return color[ cnt-1 ];
+    if( t <= wgt[ 0 ] )     return color[ 0 ];
+
+    for( int i=cnt-2; i >= 0; i-- ){
+        if( wgt[ i ] < t ){
+            //float mt = ( t - step_pos[ j ] ) / ( step_pos[ j+1 ] - step_pos[ j ] );  // Remap T between A & B
+            return mix( 
+                color[ i ], 
+                color[ i+1 ],
+                smoothstep( wgt[ i ], wgt[ i+1 ], t )
+            );
+        }
+    }
+
+    return color[ 0 ];
+}
+
+vec3 rampFeather( float t, float feather, vec3[3] color, float[3] wgt, int cnt ){        
+    for( int i=cnt-1; i > 0; i-- ){
+        if( wgt[ i ] - feather <= t ){
+            return mix( 
+                color[ i-1 ], 
+                color[ i ],
+                smoothstep( 
+                    clamp( wgt[ i ] - feather, 0.0, 1.0 ),
+                    wgt[ i+1 ] + feather, 
+                    t
+                )
+            );
+        }
+    }
+
+    return color[ 0 ];
+}
+
+vec3 rampFeatherUp( float t, float feather, vec3[3] color, float[3] wgt, int cnt ){        
+    for( int i=cnt-1; i > 0; i-- ){
+        if( wgt[ i ] <= t ){
+            return mix( 
+                color[ i-1 ], 
+                color[ i ],
+                smoothstep( wgt[ i ], wgt[ i+1 ] + feather, t )
+            );
+        }
+    }
+
+    return color[ 0 ];
+}
+
+// ########################################
+ 
+ 
+
+ float step_ramp( float t, float step_val[5], float step_pos[5], float feather, int i ){
+        for( i; i > 0; i-- ){
+            if( (step_pos[ i ]-feather) <= t ){
+                return mix( 
+                    step_val[ i-1 ], 
+                    step_val[ i ],
+                    smoothstep( step_pos[ i ] - feather, step_pos[ i ] + feather, t )
+                );
+            }
+        }
+        return step_val[ 0 ];
+    }
+
+        float step_val[5]   = float[]( 0.65, 0.70, 0.9, 0.0, 0.0 );
+        float step_pos[5]   = float[]( 0.0, 0.15, 0.4, 9.0, 9.0 );
+        float ramp          = step_ramp( lite_ratio, step_val, step_pos, 0.02, 2 );
+
+float lerp_ramp( float t, float step_val[5], float step_pos[5], int i ){
+    if( t >= step_pos[ i ] ) return step_val[ i ];
+    if( t <= step_pos[ 0 ] ) return step_val[ 0 ];
+
+    for( int j=i; j >= 0; j-- ){
+        if( step_pos[ j ] < t ){
+            //float mt = ( t - step_pos[ j ] ) / ( step_pos[ j+1 ] - step_pos[ j ] );  // Remap T between A & B
+            return mix( 
+                step_val[ j ], 
+                step_val[ j+1 ],
+                smoothstep( step_pos[ j ], step_pos[ j+1 ], t )
+            );
+        }
+    }
+
+    return step_val[ 0 ];
+}
+
+    float fgradient( float grad, float[4] ramp, float[4] ramp_pos, int cnt ){
+        if( grad >= ramp_pos[ cnt-1 ] ) return ramp[ cnt-1 ]; // Greater ten final check.
+
+        for( int i=1; i < cnt; i++ ){
+            if( ramp_pos[ i ] > grad ) return ramp[ i-1 ];
+        }
+        return ramp[ 0 ];
+    }
+
+   float[] gray_ramp       = float[4]( 0.125174, 0.528885, 0.796753, 1.0 );
+        float[] gray_ramp_pos   = float[4]( 0.0, 0.05, 0.109092, 0.190909 );
+
+    float ramp_step( float grad, float[4] ramp, float[4] ramp_pos, int cnt ){
+        if( grad >= ramp_pos[ cnt-1 ] ) return ramp[ cnt-1 ]; // Greater ten final check.
+
+        for( int i=1; i < cnt; i++ ){
+            if( ramp_pos[ i ] > grad ) return ramp[ i-1 ];
+        }
+        return ramp[ 0 ];
+    }
+
+vec3 color_step_ramp( vec3[3] color, float[3] wgt, float t ){
+    for( int i=2; i > 0; i-- ){
+        if( wgt[ i ] <= t ) return color[ i ];
+    }
+    return color[ 0 ];
+}
+
+        vec3 ramp_col[3]    = vec3[]( rgb(0x1D212A), rgb(0x2A4B53), rgb(0x81FFE9) );
+        float ramp_wgt[3]   = float[]( 0.0, 0.427386, 0.78 );
+
+    vec3 rgb( int c ){
+        return vec3(
+            float( ( c >> 16 ) & 0xff ) * 0.00392156863,
+            float( ( c >> 8 ) & 0xff ) * 0.00392156863,
+            float( c & 0xff ) * 0.00392156863
+        );
+    }
+
+struct DotRamp{
+  vec3 color_a;
+  vec3 color_b;
+  float t;
+};
+
+void color_dot_ramp( vec3[5] color, float[5] wgt, float t, float feather, int i, out DotRamp dr ){
+    for( i; i > 0; i-- ){
+        if( ( wgt[ i ] - feather ) <= t ){
+            dr.color_a  = color[ i-1 ];
+            dr.color_b  = color[ i ];
+            dr.t        = smoothstep( wgt[ i ] - feather, wgt[ i ] + feather, t );
+            return;
+        }
+    }
+
+    dr.color_a  = color[ 0 ];
+    dr.color_b  = color[ 0 ];
+    dr.t        = 0.0;
+}
+
+void color_dot_ramp2( vec3[5] color, float[5] wgt, float t, float feather, int i, out DotRamp dr ){
+    for( i; i > 0; i-- ){
+        if( ( wgt[ i ] ) <= t ){
+            dr.color_a  = color[ i-1 ];
+            dr.color_b  = color[ i ];
+            dr.t        = smoothstep( wgt[ i ], wgt[ i ] + feather, t );
+            return;
+        }
+    }
+
+    dr.color_a  = color[ 0 ];
+    dr.color_b  = color[ 0 ];
+    dr.t        = 0.0;
+}
+
+    vec3    ramp_col[5] = vec3[]( rgb(0x1D212A), rgb(0x2A4B53), rgb(0x81FFE9), vec3(.0), vec3(.0) );    
+    float   ramp_wgt[5] = float[]( 0.0, 0.35, 0.75, .0, .0 );
+    //vec3  ramp_col[5] = vec3[]( rgb(0x1A1124), rgb(0x202537), rgb(0x51617D), rgb(0xB3FFB1), vec3(.0) );
+    //float ramp_wgt[5] = float[]( 0.0, 0.214, 0.427, .589, .0 );
