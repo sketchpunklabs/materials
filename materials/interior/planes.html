@@ -1,0 +1,264 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../../lib/Starter.js';
+
+let App;
+let Debug = {};
+
+window.addEventListener( "load", _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App = new Starter( { webgl2:true, grid:true } );
+	App.setCamera( 0, 10, 2, [0,0,0] ).render();
+
+    const texBack  = new THREE.TextureLoader().load( './imgs/BrickWall_1.png' );
+    texBack.wrapS  = THREE.RepeatWrapping;
+    texBack.wrapT  = THREE.RepeatWrapping;
+
+    const texWall  = new THREE.TextureLoader().load( './imgs/BrickWall_2.png' );
+    texWall.wrapS  = THREE.RepeatWrapping;
+    texWall.wrapT  = THREE.RepeatWrapping;
+
+    const texCeil  = new THREE.TextureLoader().load( './imgs/Ceiling.png' );
+    texCeil.wrapS  = THREE.RepeatWrapping;
+    texCeil.wrapT  = THREE.RepeatWrapping;
+
+    const texFloor  = new THREE.TextureLoader().load( './imgs/WoodFloor.png' );
+    texFloor.wrapS  = THREE.RepeatWrapping;
+    texFloor.wrapT  = THREE.RepeatWrapping;
+
+    const texFacade  = new THREE.TextureLoader().load( './imgs/Facade_2.png' );
+    texFacade.wrapS  = THREE.RepeatWrapping;
+    texFacade.wrapT  = THREE.RepeatWrapping;
+
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    //const geo  = new THREE.PlaneGeometry( 1, 1 );
+    const geo  = new THREE.BoxGeometry( 1, 1 );
+    const mesh = new THREE.Mesh( geo, customMaterial( texBack, texWall, texCeil, texFloor, texFacade ) );
+    App.add( mesh );
+});
+
+/*
+// https://www.gamedeveloper.com/programming/interior-mapping-rendering-real-rooms-without-geometry
+// Images From : https://simonhughes3d.artstation.com/projects/Pm2wo4
+
+NOTES
+If you render these out you want to use a camera with a horizontal FOV of 53.13 degrees 
+a room width back from the opening.
+
+MORE READING
+https://www.unrealengine.com/marketplace/en-US/product/interior-mapping-shader/reviews
+Cross-Layout Cube Maps
+https://forum.unity.com/threads/interior-mapping.424676/#post-2751518
+-- Has an example using Cube Maps
+
+https://assetstore.unity.com/packages/vfx/shaders/fake-interiors-free-104029
+
+https://www.alanzucconi.com/2018/09/10/shader-showcase-9/
+*/
+
+
+
+// part 1 https://www.youtube.com/watch?v=2qVSV5dhdb0 
+// part 2 https://www.youtube.com/watch?v=5v6tvkb63XU 
+// part 3 https://www.youtube.com/watch?v=PHvLuS9AYS8
+function customMaterial( texBack, texWall, texCeil, texFloor, texFacade ){
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        // transparent 	: true, 
+        side            : THREE.DoubleSide,
+        // lights          : true,
+
+        uniforms        : { 
+
+            texBack : { type :'sampler2D', value: texBack },
+            texWall : { type :'sampler2D', value: texWall },
+            texCeil : { type :'sampler2D', value: texCeil },
+            texFloor : { type :'sampler2D', value: texFloor },
+            texFacade : { type :'sampler2D', value: texFacade },
+
+            
+        },
+
+        extensions      : { 
+            derivatives : true
+        },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mediump mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        out vec3    fragOPos;
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        void main(){
+            vec4 wPos 	        = modelMatrix * vec4( position, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;                    // View Space
+            
+            fragUV              = uv;
+            fragOPos            = position;
+            fragWPos            = wPos.xyz;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position			= projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+        
+        uniform sampler2D   texBack;
+        uniform sampler2D   texWall;
+        uniform sampler2D   texCeil;
+        uniform sampler2D   texFloor;
+        uniform sampler2D   texFacade;
+
+        uniform vec3 cameraPosition;
+        uniform mediump mat4 modelMatrix;
+
+        in  vec3    fragOPos;
+        in  vec3    fragWPos;
+        in  vec3    fragNorm;
+        in  vec2    fragUV;
+        out vec4    outColor;
+
+        // #####################################################################
+
+
+        // #####################################################################
+        void main(){
+
+            vec4 Rooms          = vec4( 2.0, 2.0, 2.0, 2.0 );  // XYZ if divide per plane, W is props per switchPlane
+            float RoomTile      = 2.0;
+            vec4 PositionOffset = vec4( 0.0, 0.0, 0.0, 0.0 ); // XYZ is planes, W is Props
+            
+            outColor = vec4( 1.0, 0.0, 0.0, 1.0 );
+
+            vec4 interVertexPos = vec4( fragOPos, fragOPos.x ); // or W = fragOPos.z if switchPlanes on
+            
+            mat4 modelMatrixInv = inverse( modelMatrix );
+            vec4 transCameraPos = modelMatrixInv * vec4( cameraPosition, 1.0 );
+            transCameraPos.w    = transCameraPos.x; // or W = transCameraPos.z uf switchPlanes is on
+
+
+             // -1E-0.5 = -1 * 10^-0.5 = -0.31622776601
+            vec4 rmTiling = ( Rooms + vec4( -0.31622776601 ) ) * RoomTile;
+            vec4 usePos   = ( interVertexPos - PositionOffset );
+            vec4 fUsePos  = floor( usePos * rmTiling );
+            
+            vec4 V2 = transCameraPos - PositionOffset;  //
+            vec4 V1 = usePos - V2;
+
+            vec4 stepV1 = step( vec4( 0.0 ), V1 );
+
+            vec4 a0 = ( ( fUsePos + stepV1 ) / rmTiling - V2 ) / V1; // Last Division looks sus, get 
+            float varX = a0.x;
+            float varY = a0.y;
+            float varZ = a0.z;
+            float newPlane = a0.w;
+            float Y_inverted = V1.y;
+
+            outColor.rgb = vec3( fract( varX ) );
+        
+            float backTiling = 2.0;  //BrickWall_1 is back
+            vec2 backUV      = ( (varX * V1) + V2 ).zy * backTiling;
+            vec4 backColor   = texture( texBack, backUV );
+
+            //if( varX > 2.0 ) outColor.rgb = vec3( 1.0, 0.0, 0.0 );
+
+            outColor.rgb = vec3( backUV, 0.0 );
+            outColor = backColor;
+
+            float wallTiling = 2.0;  //BrickWall_1 is back
+            vec2 wallUV      = ( (varZ * V1) + V2 ).xy * wallTiling;
+            vec4 wallColor   = texture( texWall, wallUV );
+            outColor = wallColor;
+
+            float floorTiling = 2.0;
+            float ceilTiling = 2.0;
+
+            vec2 yUV      = ( (varY * V1) + V2 ).xz;
+            vec2 floorUV  = yUV * floorTiling;
+            vec2 ceilUV   = yUV * ceilTiling;
+
+            vec4 floorCol = texture( texFloor, floorUV );
+            vec4 ceilCol = texture( texCeil, ceilUV );
+            vec4 ceilColor = mix( floorCol, ceilCol, step( 0.0, Y_inverted ) );
+            outColor = ceilColor;
+
+
+            // MIX
+
+            //float zplane = step( newPlane, varZ );
+            //outColor.rgb = vec3( zplane );
+            //float zIf   = ( zplane > 0.0 ) ? newPlane : varZ;
+            //float xStep = step( zIf, varX );
+
+            
+            float xIf   = ( step( varZ, varX ) > 0.0 )? varZ : varX;
+
+            vec4 wallOrBack = ( step( varZ, varX ) > 0.0 )? wallColor : backColor;
+
+            vec4 paraColor = ( varY > xIf )? wallOrBack : ceilColor;
+            outColor = paraColor;
+
+            float facadeTiling = 2.0;
+            vec2 facadeUV = fragUV * facadeTiling;
+            outColor.rgb = vec3( facadeUV, 0.0 );
+
+            vec4 facadeColor = texture( texFacade, facadeUV );
+            outColor = facadeColor;
+
+            outColor = mix( paraColor, facadeColor , facadeColor.a );
+
+
+
+            //outColor.rgb = vec3( xStep );
+
+
+
+
+            // vec3 roomCount = vec3( backUV, 0.0, 1.0 );
+
+            // // Move WorldSpace Camera to ObjectSpace
+            // mat4 modelMatrixInv = inverse( modelMatrix );
+            // vec3 osCamDir       = ( modelMatrixInv * vec4( fragOPos - cameraPosition, 0.0 ) ).xyz;
+            // osCamDir           *= roomCount;
+
+            // vec3 osCamDirInv    = 1.0 / osCamDir;
+            
+            // vec3 oPos      = fragOPos * roomCount * 0.99; // 0.99 is to remove some artifacts
+            // vec3 oPosGrad  = fract( oPos ) * 2.0 - 1.0;   // Remap fract between -1 & 1;
+
+            // float cMin     = minComponent( abs( osCamDirInv ) - osCamDirInv * oPosGrad );
+            // vec3 parallax  = osCamDir * cMin + oPosGrad;
+            // //parallax = parallax.xzy;
+            
+            // // outColor = vec4( oPosGrad, 1.0 );
+            // // outColor = vec4( parallax, 1.0 );
+            // outColor  = texture( texCube, parallax );
+
+
+            // // -----------------------------
+            // // Randomize the faces by using Noise
+            // vec3 vHash   = round( hash33( floor( oPos ) ) );   // round so components are either 1 or 0
+            // vec2 rot = ( vHash.xy * 2.0 - 1.0 ) * parallax.xz; // Randomly Rotate Walls, not floor&ceiling
+            // rot      = mix( rot, rot.yx, vHash.g ); // if( vHash.g == 0.0 ) rot = rot.yx;
+
+            // vec3 rotParallax = vec3( rot.x, parallax.y, rot.y );
+
+            // // outColor.rgb = vHash;
+            // // outColor.rgb = vec3( rot, 0. );
+            // outColor  = texture( texCube, rotParallax );
+        }`
+    });
+
+    return mat;
+}
+
+</script></body></html>

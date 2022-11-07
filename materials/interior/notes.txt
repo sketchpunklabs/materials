@@ -1,0 +1,45 @@
+[[ CUBEMAPS ]] =========================================================
+
+https://www.artstation.com/artwork/0nwDlV
+-- Has some extra controls
+
+part 1 https://www.youtube.com/watch?v=2qVSV5dhdb0 
+part 2 https://www.youtube.com/watch?v=5v6tvkb63XU 
+part 3 https://www.youtube.com/watch?v=PHvLuS9AYS8
+part 4 https://www.youtube.com/watch?v=-zlkF_8jrSc
+-- Object Space
+
+http://antondoe.blogspot.com/2018/07/build-fake-interior-shader-for-cheap.html?m=1
+
+
+[[ PLANES ]] ===========================================================
+
+https://godotshaders.com/shader/interior-mapping-shader/
+-- https://www.youtube.com/watch?v=9Jy3cXwR7Ws
+
+https://www.habrador.com/tutorials/shaders/2-interior-mapping/
+
+https://scahp.tistory.com/95
+https://github.com/scahp/Shadows/tree/ReliefMapping/Shadows
+
+
+[[ PROJECED INTERIOR TEXTURE ]] ========================================
+
+https://andrewgotow.com/2018/09/09/interior-mapping-part-2/
+https://andrewgotow.com/2019/02/27/interior-mapping-part-3/
+-- Shadows, Binary Mask & Distance Field
+
+https://simonhughes3d.artstation.com/projects/Pm2wo4
+-- Lots of cool textures
+
+
+[[ LOTS OF BITS ]] =====================================================
+
+https://www.artstation.com/blogs/martinwiddowson/ZP4V/interior-mapping-and-building-tile-able-rooms-ue4
+-- Includes Depth for object placement??
+
+
+[[ RESOURCES ]] =====================================================
+https://www.unrealengine.com/marketplace/en-US/product/interior-cubemaps-generic-offices?sessionInvalidated=true
+https://wparallax.gumroad.com/l/YyRmU
+https://www.artstation.com/artwork/W290vD

@@ -1,0 +1,161 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../../lib/Starter.js';
+
+let App;
+let Debug = {};
+
+window.addEventListener( "load", _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App = new Starter( { webgl2:true, grid:true } );
+	App.setCamera( 0, 10, 2, [0,0,0] ).render();
+
+    const texCube = new THREE.CubeTextureLoader()
+        .setPath( '../../assets/imgs/cubemap/' )
+        .load( [
+            'test_xp.jpg',
+            'test_xn.jpg',
+            'test_yp.jpg',
+            'test_yn.jpg',
+            'test_zp.jpg',
+            'test_zn.jpg'
+        ] );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    //const geo  = new THREE.PlaneGeometry( 1, 1 );
+    const geo  = new THREE.BoxGeometry( 1, 1 );
+    const mesh = new THREE.Mesh( geo, customMaterial( texCube ) );
+    App.add( mesh );
+});
+
+/*
+// https://www.gamedeveloper.com/programming/interior-mapping-rendering-real-rooms-without-geometry
+// Images From : https://simonhughes3d.artstation.com/projects/Pm2wo4
+
+NOTES
+If you render these out you want to use a camera with a horizontal FOV of 53.13 degrees 
+a room width back from the opening.
+
+MORE READING
+https://www.unrealengine.com/marketplace/en-US/product/interior-mapping-shader/reviews
+Cross-Layout Cube Maps
+https://forum.unity.com/threads/interior-mapping.424676/#post-2751518
+-- Has an example using Cube Maps
+
+https://assetstore.unity.com/packages/vfx/shaders/fake-interiors-free-104029
+
+https://www.alanzucconi.com/2018/09/10/shader-showcase-9/
+*/
+
+
+
+// part 1 https://www.youtube.com/watch?v=2qVSV5dhdb0 
+// part 2 https://www.youtube.com/watch?v=5v6tvkb63XU 
+// part 3 https://www.youtube.com/watch?v=PHvLuS9AYS8
+function customMaterial( texCube ){
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        // transparent 	: true, 
+        side            : THREE.DoubleSide,
+        // lights          : true,
+
+        uniforms        : { 
+            texCube : { type :'samplerCube', value: texCube },
+        },
+
+        extensions      : { 
+            derivatives : true
+        },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mediump mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        out vec3    fragOPos;
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        void main(){
+            vec4 wPos 	        = modelMatrix * vec4( position, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;                    // View Space
+            
+            fragUV              = uv;
+            fragOPos            = position;
+            fragWPos            = wPos.xyz;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position			= projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+        
+        uniform samplerCube texCube;
+        uniform vec3 cameraPosition;
+        uniform mediump mat4 modelMatrix;
+
+        in  vec3    fragOPos;
+        in  vec3    fragWPos;
+        in  vec3    fragNorm;
+        in  vec2    fragUV;
+        out vec4    outColor;
+
+        // #####################################################################
+
+        float minComponent( vec3 v ){ return min (min ( v.x, v.y ), v.z ); }
+
+        vec3 hash33( vec3 inp ){
+            vec3 rnd = vec3(
+                dot( inp.xyz, vec3( 127.1, 311.7, 74.7 ) ),
+                dot( inp.yxz, vec3( 269.5, 183.3, 246.1 ) ),
+                dot( inp.xzy, vec3( 113.5, 271.9, 124.6 ) )
+            );
+            return fract( sin( rnd ) * 43758.5453123 );
+        }
+
+        // #####################################################################
+        void main(){
+            vec3 roomCount = vec3( 2.0 );
+
+            // Move WorldSpace Camera to ObjectSpace
+            mat4 modelMatrixInv = inverse( modelMatrix );
+            vec3 osCamDir       = ( modelMatrixInv * vec4( fragOPos - cameraPosition, 0.0 ) ).xyz;  // This might be a prob, using frag LS Pos - WS CamPos, wrong spaces but since not rotating no big deal.
+            osCamDir           *= roomCount;
+
+            vec3 osCamDirInv    = 1.0 / osCamDir;
+            
+            vec3 oPos      = fragOPos * roomCount * 0.99; // 0.99 is to remove some artifacts
+            vec3 oPosGrad  = fract( oPos ) * 2.0 - 1.0;   // Remap fract between -1 & 1;
+
+            float cMin     = minComponent( abs( osCamDirInv ) - osCamDirInv * oPosGrad );
+            vec3 parallax  = osCamDir * cMin + oPosGrad;
+            //parallax = parallax.xzy;
+            
+            // outColor = vec4( oPosGrad, 1.0 );
+            // outColor = vec4( parallax, 1.0 );
+            outColor  = texture( texCube, parallax );
+
+
+            // -----------------------------
+            // Randomize the faces by using Noise
+            vec3 vHash   = round( hash33( floor( oPos ) ) );   // round so components are either 1 or 0
+            vec2 rot = ( vHash.xy * 2.0 - 1.0 ) * parallax.xz; // Randomly Rotate Walls, not floor&ceiling
+            rot      = mix( rot, rot.yx, vHash.g ); // if( vHash.g == 0.0 ) rot = rot.yx;
+
+            vec3 rotParallax = vec3( rot.x, parallax.y, rot.y );
+
+            // outColor.rgb = vHash;
+            // outColor.rgb = vec3( rot, 0. );
+            outColor  = texture( texCube, rotParallax );
+        }`
+    });
+
+    return mat;
+}
+
+</script></body></html>

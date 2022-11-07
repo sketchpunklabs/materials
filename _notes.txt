@@ -1,0 +1,25 @@
+https://cdnjs.com/libraries/three.js
+
+https://flatkit.dustyroom.com/
+
+https://github.com/ColinLeung-NiloCat/UnityURPToonLitShaderExample
+
+
+Simple example of PBR Shader
+https://github.com/JulianAtGitHub/WebGLSample/tree/master/src/shaders
+
+
+Procedural Sky with Clouds
+https://github.com/supereggbert/Procedural-Sky
+
+
+Convert scene to Equirectangular texture
+https://github.com/spite/THREE.CubemapToEquirectangular
+
+
+gyro noise
+https://www.shadertoy.com/view/msf3DB
+
+
+https://github.com/mrdoob/three.js/blob/master/src/renderers/shaders/ShaderChunk/cube_uv_reflection_fragment.glsl.js#L78 // Compute UV from Mip Level
+https://github.com/mrdoob/three.js/blob/master/src/renderers/shaders/ShaderChunk/cube_uv_reflection_fragment.glsl.js#L44 // Compute UV from Normal + Face Idex

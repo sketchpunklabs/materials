@@ -1,0 +1,113 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../lib/Starter.js';
+import ShaderDict           from '../lib/shaders/ShaderDict.js';
+
+let App;
+
+window.addEventListener( "load", async _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App = new Starter( { webgl2:false, grid:true } );
+	App.setCamera( 0, 20, 2 ).render();
+
+	await ShaderDict.bulk([ 
+        './pkg/Constants.js',
+        './pkg/Funcs.js',
+        './pkg/noise/PerlinNoise.js',
+        './pkg/noise/VoroNoise.js',
+    ]);
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	const geo  = new THREE.PlaneGeometry( 1, 1 );
+	const mat  = CustomMaterial();
+	const mesh = new THREE.Mesh( geo, mat );
+
+    App.add( mesh );
+});
+
+
+function CustomMaterial(){
+    return new THREE.RawShaderMaterial({
+    depthTest       : true,
+    transparent 	: false,
+	side			: THREE.DoubleSide,
+    uniforms        : { 
+        // Clock       : { value : 0 },
+    },
+    vertexShader    : `#version 300 es
+    in vec3 position;
+    in vec3 normal;
+    in vec2 uv;
+    
+    uniform mat4 modelMatrix;
+    uniform mat4 viewMatrix;
+    uniform mat4 projectionMatrix;
+
+    out vec3 fragNorm;
+    out vec3 fragWPos;
+    out vec2 fragUV;
+   
+    /////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////
+
+    void main(){
+        vec4 wPos   = modelMatrix * vec4( position, 1.0 );
+        fragWPos    = wPos.xyz;
+        fragNorm    = normal;
+        fragUV      = uv;
+
+        gl_Position = projectionMatrix * viewMatrix * wPos;
+    }`,
+	
+    fragmentShader  : ShaderDict`#version 300 es
+    precision mediump float;
+
+    in vec3 fragNorm;
+    in vec3 fragWPos;
+    in vec2 fragUV;
+
+    out vec4  outColor;
+
+    ////////////////////////////////////////////////////////////////////////
+
+    #include Constants
+    #include Funcs.rotateUV
+    #include PerlinNoise.fbmOptions
+    #include PerlinNoise.2D
+    #include PerlinNoise.2D_fbm
+    #include VoroNoise
+
+    ////////////////////////////////////////////////////////////////////////
+
+    void main(){
+        outColor = vec4( fragUV, 0.0, 1.0 );
+        // https://www.youtube.com/watch?v=KqWfo6EPjCw
+        float uvScale   = 1.0;
+        float sineFreq  = 9.52;
+        float uvRot     = 8.36;
+        vec2  uv        = rotateUV( fragUV * uvScale, uvRot );
+        
+        /*
+        seed           Seed for PRNG generation.
+        persistance    Factor by which successive layers of noise will decrease in amplitude. ( 0.5, 0.01 > 2 )
+        lacunarity     Factor by which successive layers of noise will increase in frequency. ( 2, 0.1 > 4 )
+        scale          "Zoom level" of generated noise. ( 1, 0.01 > 5 )
+        redistribution Flatness in the generated noise. ( 1, 0.1 > 5 )
+        octaves        Number of layers of noise to stack. ( 7, 1 > 10 )
+        terbulance     Enable terbulance
+        ridge          Convert the fBm to Ridge Noise. Only works when "terbulance" is set to true.
+
+        fbmOptions opts = fbmOptions( 0.0, 0.5, 1.0, 1.0, 1.0, 4, false, false );
+        */
+
+        fbmOptions opts = fbmOptions( 0.0, 0.5, 1.0, 3.5, 0.3, 4, false, false );
+        outColor.rgb = vec3( perlinNoise_fbm( fragUV, opts ) );
+        //outColor.rgb = vec3( voroNoise( fragUV * 8.0, 1.0, 1.0 ) );
+
+        float v         = sin( uv.y * ( TAU * sineFreq ) );
+
+        //outColor.rgb = vec3( v );        
+    }`});
+}
+
+
+</script></body></html>

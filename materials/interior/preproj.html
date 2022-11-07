@@ -1,0 +1,380 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../../lib/Starter.js';
+
+let App;
+let Debug = {};
+
+window.addEventListener( "load", _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App = new Starter( { webgl2:true, grid:true } );
+	App.setCamera( 0, 10, 2, [0,0,0] ).render();
+
+    const texProj  = new THREE.TextureLoader().load( './imgs/simon-hughes-05-simonhughes.jpg' );
+    texProj.wrapS  = THREE.RepeatWrapping;
+    texProj.wrapT  = THREE.RepeatWrapping;
+
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const geo  = new THREE.PlaneGeometry( 1, 1 );
+    //const geo  = new THREE.BoxGeometry( 1, 1 );
+    const mesh = new THREE.Mesh( geo, customMaterial( texProj  ) );
+    App.add( mesh );
+});
+
+function customMaterial( texProj ){
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        // transparent 	: true, 
+        side            : THREE.DoubleSide,
+        // lights          : true,
+
+        uniforms        : { 
+            texProj : { type :'sampler2D', value: texProj },            
+        },
+
+        extensions      : { 
+            derivatives : true
+        },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mediump mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        out vec3    fragOPos;
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        void main(){
+            vec4 wPos 	        = modelMatrix * vec4( position, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;                    // View Space
+            
+            fragUV              = uv;
+            fragOPos            = position;
+            fragWPos            = wPos.xyz;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position			= projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+        
+        uniform sampler2D   texProj;
+
+        uniform vec3 cameraPosition;
+        uniform mediump mat4 modelMatrix;
+
+        in  vec3    fragOPos;
+        in  vec3    fragWPos;
+        in  vec3    fragNorm;
+        in  vec2    fragUV;
+        out vec4    outColor;
+
+        // #####################################################################
+
+        vec3 DirObjectSpaceToTangentSpace( vec3 inputDirOS, vec3 normalOS, vec3 tangentOS ){
+            vec3 bitTan = cross( normalOS, tangentOS );
+            return vec3(
+                dot( inputDirOS, tangentOS ),
+                dot( inputDirOS, bitTan ),
+                dot( inputDirOS, normalOS )
+            );
+                // float tangentSign  = tangentOS.w * unity_WorldTransformParams.w;
+                // float3 bitangentOS = cross(normalOS, tangentOS.xyz) * tangentSign;
+                // return float3(
+                //         dot(inputDirOS, tangentOS.xyz),
+                //         dot(inputDirOS, bitangentOS),
+                //         dot(inputDirOS, normalOS)
+                //         );
+        }
+
+        // bgolus's original source code: https://forum.unity.com/threads/interior-mapping.424676/#post-2751518
+        // this reusable InteriorUVFunction.hlsl is created base on bgolus's original source code
+ 
+        //for param "roomMaxDepth01Define": input 0.0001 if room is a "near 0 volume" room, input 0.9999 if room is a "near inf depth" room
+        vec2 ConvertOriginalRawUVToInteriorUV( vec2 originalRawUV, vec3 viewDirTangentSpace, float roomMaxDepth01Define ){
+            //remap [0,1] to [+inf,0]
+            //->if input roomMaxDepth01Define = 0    -> depthScale = +inf   (0 volume room)
+            //->if input roomMaxDepth01Define = 0.5  -> depthScale = 1
+            //->if input roomMaxDepth01Define = 1    -> depthScale = 0              (inf depth room)
+            
+            //float depthScale = rcp( roomMaxDepth01Define ) - 1.0;
+            float depthScale = 1.0 / roomMaxDepth01Define - 1.0;
+
+            //normalized box space is a space where room's min max corner = (-1,-1,-1) & (+1,+1,+1)
+            //apply simple scale & translate to tangent space = transform tangent space to normalized box space
+
+            //now prepare ray box intersection test's input data in normalized box space
+            vec3 viewRayStartPosBoxSpace = vec3( originalRawUV * 2.0 - 1.0, -1.0 ); //normalized box space's ray start pos is on trinagle surface, where z = -1
+            vec3 viewRayDirBoxSpace = viewDirTangentSpace * vec3( 1.0, 1.0, -depthScale);//transform input ray dir from tangent space to normalized box space
+
+            //do ray & axis aligned box intersection test in normalized box space (all input transformed to normalized box space)
+            //intersection test function used = https://www.iquilezles.org/www/articles/intersectors/intersectors.htm
+            //============================================================================
+            vec3 viewRayDirBoxSpaceRcp = 1.0 / viewRayDirBoxSpace;
+
+            //hitRayLengthForSeperatedAxis means normalized box space depth hit per x/y/z plane seperated
+            //(we dont care about near hit result here, we only want far hit result)
+            
+            vec3 hitRayLengthForSeperatedAxis = abs(viewRayDirBoxSpaceRcp) - viewRayStartPosBoxSpace * viewRayDirBoxSpaceRcp;
+            
+            //shortestHitRayLength = normalized box space real hit ray length
+            float shortestHitRayLength = min(min(hitRayLengthForSeperatedAxis.x, hitRayLengthForSeperatedAxis.y), hitRayLengthForSeperatedAxis.z);
+            
+            //normalized box Space real hit pos = rayOrigin + t * rayDir.
+            vec3 hitPosBoxSpace = viewRayStartPosBoxSpace + shortestHitRayLength * viewRayDirBoxSpace;
+            
+            //============================================================================
+
+            // remap from [-1,1] to [0,1] room depth
+            float interp = hitPosBoxSpace.z * 0.5 + 0.5;
+
+            // account for perspective in "room" textures
+            // assumes camera with an fov of 53.13 degrees (atan(0.5))
+            //hard to explain, visual result = transform nonlinear depth back to linear
+            float realZ = clamp( interp, 0.0, 1.0 ) / depthScale + 1.0;
+            interp = 1.0 - ( 1.0 / realZ );
+            interp *= depthScale + 1.0;
+
+            //linear iterpolate from wall back to near
+            //float2 interiorUV = hitPosBoxSpace.xy * lerp(1.0, 1.0 - roomMaxDepth01Define, interp);
+            vec2 interiorUV = hitPosBoxSpace.xy * mix( 1.0, 1.0 - roomMaxDepth01Define, interp );
+
+            //convert back to valid 0~1 uv, ready for user's tex2D() call
+            interiorUV = interiorUV * 0.5 + 0.5;
+            return interiorUV;
+        }
+
+
+        // Transforms 2D UV by scale/bias property, scales texture then adds offset
+        // #define TRANSFORM_TEX(tex,name) (tex.xy * name##_ST.xy + name##_ST.zw)
+
+        // This simpler version seems to work just as good as the other
+        // smoothNormal is the interpolated normal from the vertex shader without being normalized
+        // https://irrlicht.sourceforge.io/forum/viewtopic.php?t=52284
+        mat3 tbnMatrix2( vec3 smoothNormal, vec3 pos, vec2 uv ){
+            vec3 denormTangent = dFdx( uv.y ) * dFdy( pos ) - dFdx( pos ) * dFdy( uv.y );
+            vec3 tangent       = normalize( denormTangent - smoothNormal * dot( smoothNormal, denormTangent ) );
+ 
+            vec3 norm          = normalize( smoothNormal );
+            vec3 bitangent     = cross( norm, tangent );
+
+            mat3 tbn		   = mat3( tangent, bitangent, norm );
+            return tbn;
+        }
+
+
+        vec3 DirObjectSpaceToTangentSpace2( vec3 inputDirOS, vec3 smoothNormal, vec3 frag2eye, vec2 uv ){
+            vec3 denormTangent = dFdx( uv.y ) * dFdy( frag2eye ) - dFdx( frag2eye ) * dFdy( uv.y );
+            vec3 tangent       = normalize( denormTangent - smoothNormal * dot( smoothNormal, denormTangent ) );
+ 
+            vec3 norm          = normalize( smoothNormal );
+            vec3 bitangent     = cross( norm, tangent );
+
+            return vec3(
+                dot( inputDirOS, tangent ),
+                dot( inputDirOS, bitangent ),
+                dot( inputDirOS, norm )
+            );
+                // float tangentSign  = tangentOS.w * unity_WorldTransformParams.w;
+                // float3 bitangentOS = cross(normalOS, tangentOS.xyz) * tangentSign;
+                // return float3(
+                //         dot(inputDirOS, tangentOS.xyz),
+                //         dot(inputDirOS, bitangentOS),
+                //         dot(inputDirOS, normalOS)
+                //         );
+        }
+
+        // #####################################################################
+        void main(){
+
+
+            outColor = vec4( 1.0, 0.0, 0.0, 1.0 );
+
+            mat4 modelMatrixInv = inverse( modelMatrix );
+            vec3 oCamPos        = ( modelMatrixInv * vec4( cameraPosition, 1.0 ) ).xyz;
+
+            float RoomDepth     = 0.583;  // 0 to 1
+            float RoomCount     = 4.0;
+            vec2 uv             = fragUV * 4.0;
+
+            vec3 norm           = normalize( fragNorm );
+            vec3 tangent        = vec3( 0.0, 1.0, 0.0 ); // TODO: Hack for vertical plane
+            vec3 oCamDir        = fragOPos - oCamPos;
+
+            //vec3 tanCamDir      = DirObjectSpaceToTangentSpace( oCamDir, norm, tangent );
+            vec3 tanCamDir      = DirObjectSpaceToTangentSpace2( oCamDir, fragNorm, -oCamDir, fragUV );
+
+            vec2 interiorUV     = ConvertOriginalRawUVToInteriorUV( fract( uv ), tanCamDir, RoomDepth );
+            interiorUV          /= RoomCount;
+            //                     interiorUV = TRANSFORM_TEX(interiorUV, _RoomTex);
+            
+            vec2 atlas = floor( uv );
+            interiorUV += atlas / RoomCount;
+
+
+            outColor = vec4( vec2( interiorUV ), 0.0, 1.0 );
+            outColor = texture( texProj, interiorUV );
+
+
+            // //regular
+            //                     o.pos = UnityObjectToClipPos(v.vertex);
+ 
+            //                     //tile uv base on room count in vertex shader
+            //                     o.uv = v.uv * _RoomCount;
+ 
+            //                     //find view dir Object Space
+            //                     float3 camPosObjectSpace = mul(unity_WorldToObject, float4(_WorldSpaceCameraPos, 1.0)).xyz;
+            //                     float3 viewDirObjectSpace = v.vertex.xyz - camPosObjectSpace;
+ 
+            //                     //get tangent space view vector
+            //                     o.tangentViewDir = DirObjectSpaceToTangentSpace(viewDirObjectSpace, v.normal, v.tangent);
+ 
+
+            //                     float2 interiorUV = ConvertOriginalRawUVToInteriorUV(frac(i.uv), i.tangentViewDir, _RoomMaxDepth01);
+            //                     interiorUV /= _RoomCount;
+            //                     interiorUV = TRANSFORM_TEX(interiorUV, _RoomTex);
+ 
+            //                     //map to differrent room if needed
+            //                     float2 roomIndex = floor(i.uv);
+            //                     interiorUV += roomIndex / _RoomCount;
+ 
+            //                     return tex2D(_RoomTex, interiorUV);
+
+
+
+            // vec4 Rooms          = vec4( 2.0, 2.0, 2.0, 2.0 );  // XYZ if divide per plane, W is props per switchPlane
+            // float RoomTile      = 2.0;
+            // vec4 PositionOffset = vec4( 0.0, 0.0, 0.0, 0.0 ); // XYZ is planes, W is Props
+            
+            // outColor = vec4( 1.0, 0.0, 0.0, 1.0 );
+
+            // vec4 interVertexPos = vec4( fragOPos, fragOPos.x ); // or W = fragOPos.z if switchPlanes on
+            
+            // mat4 modelMatrixInv = inverse( modelMatrix );
+            // vec4 transCameraPos = modelMatrixInv * vec4( cameraPosition, 1.0 );
+            // transCameraPos.w    = transCameraPos.x; // or W = transCameraPos.z uf switchPlanes is on
+
+
+            //  // -1E-0.5 = -1 * 10^-0.5 = -0.31622776601
+            // vec4 rmTiling = ( Rooms + vec4( -0.31622776601 ) ) * RoomTile;
+            // vec4 usePos   = ( interVertexPos - PositionOffset );
+            // vec4 fUsePos  = floor( usePos * rmTiling );
+            
+            // vec4 V2 = transCameraPos - PositionOffset;  //
+            // vec4 V1 = usePos - V2;
+
+            // vec4 stepV1 = step( vec4( 0.0 ), V1 );
+
+            // vec4 a0 = ( ( fUsePos + stepV1 ) / rmTiling - V2 ) / V1; // Last Division looks sus, get 
+            // float varX = a0.x;
+            // float varY = a0.y;
+            // float varZ = a0.z;
+            // float newPlane = a0.w;
+            // float Y_inverted = V1.y;
+
+            // outColor.rgb = vec3( fract( varX ) );
+        
+            // float backTiling = 2.0;  //BrickWall_1 is back
+            // vec2 backUV      = ( (varX * V1) + V2 ).zy * backTiling;
+            // vec4 backColor   = texture( texBack, backUV );
+
+            // //if( varX > 2.0 ) outColor.rgb = vec3( 1.0, 0.0, 0.0 );
+
+            // outColor.rgb = vec3( backUV, 0.0 );
+            // outColor = backColor;
+
+            // float wallTiling = 2.0;  //BrickWall_1 is back
+            // vec2 wallUV      = ( (varZ * V1) + V2 ).xy * wallTiling;
+            // vec4 wallColor   = texture( texWall, wallUV );
+            // outColor = wallColor;
+
+            // float floorTiling = 2.0;
+            // float ceilTiling = 2.0;
+
+            // vec2 yUV      = ( (varY * V1) + V2 ).xz;
+            // vec2 floorUV  = yUV * floorTiling;
+            // vec2 ceilUV   = yUV * ceilTiling;
+
+            // vec4 floorCol = texture( texFloor, floorUV );
+            // vec4 ceilCol = texture( texCeil, ceilUV );
+            // vec4 ceilColor = mix( floorCol, ceilCol, step( 0.0, Y_inverted ) );
+            // outColor = ceilColor;
+
+
+            // // MIX
+
+            // //float zplane = step( newPlane, varZ );
+            // //outColor.rgb = vec3( zplane );
+            // //float zIf   = ( zplane > 0.0 ) ? newPlane : varZ;
+            // //float xStep = step( zIf, varX );
+
+            
+            // float xIf   = ( step( varZ, varX ) > 0.0 )? varZ : varX;
+
+            // vec4 wallOrBack = ( step( varZ, varX ) > 0.0 )? wallColor : backColor;
+
+            // vec4 paraColor = ( varY > xIf )? wallOrBack : ceilColor;
+            // outColor = paraColor;
+
+            // float facadeTiling = 2.0;
+            // vec2 facadeUV = fragUV * facadeTiling;
+            // outColor.rgb = vec3( facadeUV, 0.0 );
+
+            // vec4 facadeColor = texture( texFacade, facadeUV );
+            // outColor = facadeColor;
+
+            // outColor = mix( paraColor, facadeColor , facadeColor.a );
+
+
+
+            // //outColor.rgb = vec3( xStep );
+
+
+
+
+            // vec3 roomCount = vec3( backUV, 0.0, 1.0 );
+
+            // // Move WorldSpace Camera to ObjectSpace
+            // mat4 modelMatrixInv = inverse( modelMatrix );
+            // vec3 osCamDir       = ( modelMatrixInv * vec4( fragOPos - cameraPosition, 0.0 ) ).xyz;
+            // osCamDir           *= roomCount;
+
+            // vec3 osCamDirInv    = 1.0 / osCamDir;
+            
+            // vec3 oPos      = fragOPos * roomCount * 0.99; // 0.99 is to remove some artifacts
+            // vec3 oPosGrad  = fract( oPos ) * 2.0 - 1.0;   // Remap fract between -1 & 1;
+
+            // float cMin     = minComponent( abs( osCamDirInv ) - osCamDirInv * oPosGrad );
+            // vec3 parallax  = osCamDir * cMin + oPosGrad;
+            // //parallax = parallax.xzy;
+            
+            // // outColor = vec4( oPosGrad, 1.0 );
+            // // outColor = vec4( parallax, 1.0 );
+            // outColor  = texture( texCube, parallax );
+
+
+            // // -----------------------------
+            // // Randomize the faces by using Noise
+            // vec3 vHash   = round( hash33( floor( oPos ) ) );   // round so components are either 1 or 0
+            // vec2 rot = ( vHash.xy * 2.0 - 1.0 ) * parallax.xz; // Randomly Rotate Walls, not floor&ceiling
+            // rot      = mix( rot, rot.yx, vHash.g ); // if( vHash.g == 0.0 ) rot = rot.yx;
+
+            // vec3 rotParallax = vec3( rot.x, parallax.y, rot.y );
+
+            // // outColor.rgb = vHash;
+            // // outColor.rgb = vec3( rot, 0. );
+            // outColor  = texture( texCube, rotParallax );
+        }`
+    });
+
+    return mat;
+}
+
+</script></body></html>

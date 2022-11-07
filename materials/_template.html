@@ -1,0 +1,40 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../lib/Starter.js';
+import ShapePointsMesh     	from '../lib/meshes/ShapePointsMesh.js';
+import DynLinesMesh        	from '../lib/meshes/DynLineMesh.js';
+import PixelFontMesh       	from '../lib/meshes/PixelFontMesh.js';
+import facedCube           	from '../lib/meshes/FacedCube.js';
+
+let App;
+let Debug = {};
+
+window.addEventListener( "load", _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App = new Starter( { webgl2:false, grid:true } );
+	App.setCamera( 0, 20, 6, [0,0,0] ).render();
+
+	App.add( (Debug.pnt = new ShapePointsMesh() ) );
+    App.add( (Debug.ln  = new DynLinesMesh() ) );
+    App.add( (Debug.px  = new PixelFontMesh() ) );
+    Debug.px.setRes( 3, 2 );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Debug.pnt
+        .add( [-1,0,0], 0x00ffff, 4, 1 )
+        .add( [1,0,0],  0x00ffff, 6, 2 )
+        .add( [0,1,0],  0xffff00, 6, 5 );
+
+    Debug.ln
+        .add( [-1,0,0], [-1,1,0], 0x00ffff, 0xffff00, false )
+        .add( [1,0,0],  [1,1,0],  0x00ffff, 0xffff00, false )
+        .add( [-1,1,0], [1,1,0],  0xffff00, null, true );
+
+    Debug.px.setPos( 0, 0 ).addText( 'MO', 1 );
+    Debug.px.setPos( 0, 1 ).addText( 'Sketchpunk' );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const cube = facedCube();
+    cube.position.set( 0, 0, -6 );
+    App.add( cube );
+});
+</script></body></html>

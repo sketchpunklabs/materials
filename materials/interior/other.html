@@ -1,0 +1,205 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../../lib/Starter.js';
+
+let App;
+let Debug = {};
+
+window.addEventListener( "load", _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App = new Starter( { webgl2:true, grid:true } );
+	App.setCamera( 0, 10, 2, [0,0,0] ).render();
+
+    const texCube = new THREE.CubeTextureLoader()
+        .setPath( '../../assets/imgs/cubemap/' )
+        .load( [
+            'test_xp.jpg',
+            'test_xn.jpg',
+            'test_yp.jpg',
+            'test_yn.jpg',
+            'test_zp.jpg',
+            'test_zn.jpg'
+        ] );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    //const geo  = new THREE.PlaneGeometry( 1, 1 );
+    const geo  = new THREE.BoxGeometry( 1, 1 );
+    const mesh = new THREE.Mesh( geo, customMaterial( texCube ) );
+    App.add( mesh );
+});
+
+/*
+// https://www.gamedeveloper.com/programming/interior-mapping-rendering-real-rooms-without-geometry
+// Images From : https://simonhughes3d.artstation.com/projects/Pm2wo4
+
+NOTES
+If you render these out you want to use a camera with a horizontal FOV of 53.13 degrees 
+a room width back from the opening.
+
+MORE READING
+https://www.unrealengine.com/marketplace/en-US/product/interior-mapping-shader/reviews
+Cross-Layout Cube Maps
+https://forum.unity.com/threads/interior-mapping.424676/#post-2751518
+-- Has an example using Cube Maps
+
+https://assetstore.unity.com/packages/vfx/shaders/fake-interiors-free-104029
+
+https://www.alanzucconi.com/2018/09/10/shader-showcase-9/
+*/
+
+
+
+// part 1 https://www.youtube.com/watch?v=2qVSV5dhdb0 
+// part 2 https://www.youtube.com/watch?v=5v6tvkb63XU 
+// part 3 https://www.youtube.com/watch?v=PHvLuS9AYS8
+function customMaterial( texCube ){
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        // transparent 	: true, 
+        side            : THREE.DoubleSide,
+        // lights          : true,
+
+        uniforms        : { 
+            texCube : { type :'samplerCube', value: texCube },
+        },
+
+        extensions      : { 
+            derivatives : true
+        },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        void main(){
+            vec4 wPos 	        = modelMatrix * vec4( position, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;                    // View Space
+            
+            fragUV              = uv;
+            fragWPos            = wPos.xyz;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position			= projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+        
+        uniform samplerCube texCube;
+        uniform vec3 cameraPosition;
+
+        in  vec3    fragWPos;
+        in  vec3    fragNorm;
+        in  vec2    fragUV;
+        out vec4    outColor;
+
+
+        // #####################################################################
+
+        mat3 tbnMatrix( vec3 norm, vec3 nEye2Frag, vec2 uv ){
+            // https://www.geeks3d.com/20130122/normal-mapping-without-precomputed-tangent-space-vectors/
+            // http://www.thetenthplanet.de/archives/1180
+            // Get edge vectors of the pixel triangle
+            vec3	dp1		= dFdx( nEye2Frag ),
+                    dp2		= dFdy( nEye2Frag );
+            vec2	duv1	= dFdx( uv ),
+                    duv2	= dFdy( uv );
+
+            // Solve the linear system
+            vec3 	dp2perp	= cross( dp2, norm ),
+                    dp1perp	= cross( norm, dp1 ),
+                    T		= dp2perp * duv1.x + dp1perp * duv2.x,
+                    B		= dp2perp * duv1.y + dp1perp * duv2.y;
+
+            // Construct a scale-invariant frame 
+            float invmax	= inversesqrt( max( dot(T,T), dot(B,B) ) );
+            mat3 tbn		= mat3( T * invmax, B * invmax, norm );
+
+            return tbn;
+        }
+
+        // This simpler version seems to work just as good as the other
+        // smoothNormal is the interpolated normal from the vertex shader without being normalized
+        // https://irrlicht.sourceforge.io/forum/viewtopic.php?t=52284
+        mat3 tbnMatrix2( vec3 smoothNormal, vec3 pos, vec2 uv ){
+            vec3 denormTangent = dFdx( uv.y ) * dFdy( pos ) - dFdx( pos ) * dFdy( uv.y );
+            vec3 tangent       = normalize( denormTangent - smoothNormal * dot( smoothNormal, denormTangent ) );
+ 
+            vec3 norm          = normalize( smoothNormal );
+            vec3 bitangent     = cross( norm, tangent );
+
+            mat3 tbn		   = mat3( tangent, bitangent, norm );
+            return tbn;
+        }
+
+        float minComponent( vec3 v ){ return min (min ( v.x, v.y ), v.z ); }
+
+        vec3 hash23( vec2 inp ){
+            vec3 rnd = vec3(
+                dot( inp.xyx, vec3( 127.1, 311.7, 74.7 ) ),
+                dot( inp.yxx, vec3( 269.5, 183.3, 246.1 ) ),
+                dot( inp.xyy, vec3( 113.5, 271.9, 124.6 ) )
+            );
+            return fract( sin( rnd ) * 43758.5453123 );
+        }
+
+        // #####################################################################
+        void main(){
+            // -----------------------------
+            float roomCount = 4.0;
+            vec2 uv        = fragUV * roomCount; // Sub Divide the space to create extra rooms   
+            
+            vec3 texCoord3 = vec3(
+                fract( uv ) * vec2( 2.0, 2.0 ) - vec2( 1.0, 1.0 ),
+                -1.0
+            );
+
+            outColor.rgb = texCoord3;
+            outColor.a   = 1.0;
+
+            // -----------------------------
+            mat3 tbn       = tbnMatrix2( fragNorm, fragWPos, fragUV );
+            vec3 tbnCam    = tbn * ( cameraPosition - fragWPos );
+            tbnCam        *= vec3( 1.0, 1.0, 1.0 ); // Fix textures if needed by flipping to -1 on an axis
+            vec3 tbnCamInv = 1.0 / tbnCam;
+
+            // -----------------------------
+            float cMin     = minComponent( abs( tbnCamInv ) - tbnCamInv * texCoord3 );
+            vec3 parallax  = tbnCam * cMin + texCoord3;
+            //parallax       = parallax.xzy; // Can do 90 degree rotation to help fix things
+
+            //outColor       = texture( texCube, tbnCam * vec3( 1.0, 1.0, 1.0 ) );
+            outColor       = texture( texCube, parallax );
+
+            // -----------------------------
+            // Randomize the faces by using Noise
+            vec3 vHash   = round( hash23( floor( uv ) ) ); // round so components are either 1 or 0
+            vec3 rndA    = mix( vec3( 1.0, 1.0, -1.0 ), vec3( 1.0, -1.0, 1.0 ), vHash.x );
+            vec3 rndB    = mix( vec3( 1.0, 1.0, 1.0 ), vec3( -1.0, 1.0, 1.0 ), vHash.y );
+            vec3 rnd     = rndA * rndB; // parallax * rnd will only swop
+            vec3 axisPara = parallax * rnd;
+            
+            // swop around : xyz yzx zxy
+            vec3 rndPara = mix(
+                mix( axisPara, axisPara.yzx, vHash.z ),
+                axisPara.zxy, 
+                vHash.x
+            );
+
+            outColor   = texture( texCube, rndPara );
+            //outColor.rgb = rndPara;
+        }`
+    });
+
+    return mat;
+}
+
+</script></body></html>
