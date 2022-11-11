@@ -128,7 +128,7 @@ function customMaterial( texBack, texWallL, texWallR, texCeil, texFloor, texFaca
             vec3 cam2frag   = ( fragOPos - rooms ) - ( oCameraPos.xyz - rooms );
             outColor.rgb = cam2frag;
 
-            float depth = roomDepth * 2.0;
+            float depth = roomDepth * 1.0;
 
             float is_floor = step( cam2frag.y, 0.0 ); // Floor : y <= 0, Ceil : y > 0
             float ceil_y   = ceil( fragOPos.y / depth - is_floor ) * depth;
@@ -140,139 +140,35 @@ function customMaterial( texBack, texWallL, texWallR, texCeil, texFloor, texFaca
             // else  outColor     = texture( texCeil, ( oCameraPos.xz + ceil_t * cam2frag.xz )  );
             // outColor     = texture( texCeil, ( oCameraPos.xz + ceil_t * cam2frag.xz )  );
 
+            // return;
+
             float is_north = step( cam2frag.z, 0.0 ); // North : z <= 0, South : z > 0
             float wall_f_z   = ceil( fragOPos.z / room_size - is_north ) * room_size;
             float wall_f_t   = ( wall_f_z - oCameraPos.z ) / cam2frag.z;
             outColor     = texture( texBack, ( oCameraPos.xy + wall_f_t * cam2frag.xy )  );
 
-            // outColor.rgb = vec3( wall_f_t );
-            
+            //outColor.rgb = vec3( wall_f_t );
+
+            float is_east = step( cam2frag.x, 0.0 );
+            float wall_ez = ceil( fragOPos.x / room_size - is_east ) * room_size;
+            float wall_et = ( wall_ez - oCameraPos.x ) / cam2frag.x;
+
+            // if( is_east == 0.0 )    outColor     = texture( texWallR, ( oCameraPos.zy + wall_et * cam2frag.zy )  );
+            // else                    outColor     = texture( texWallL, ( oCameraPos.zy + wall_et * cam2frag.zy )  );
+
+            float min_t = min( min( ceil_t, wall_f_t  ), wall_et );
+
+            if( wall_et == min_t ){
+                if( is_east == 0.0 )    outColor     = texture( texWallR, ( oCameraPos.zy + wall_et * cam2frag.zy )  );
+                else                    outColor     = texture( texWallL, ( oCameraPos.zy + wall_et * cam2frag.zy )  );
+            }else if( wall_f_t == min_t ){
+                outColor     = texture( texBack, ( oCameraPos.xy + wall_f_t * cam2frag.xy )  );
+            }else{
+                if( is_floor == 1.0 ) outColor     = texture( texFloor, ( oCameraPos.xz + ceil_t * cam2frag.xz )  );
+                else  outColor     = texture( texCeil, ( oCameraPos.xz + ceil_t * cam2frag.xz )  );
+            }
 
 
-
-
-            // vec4 Rooms          = vec4( 2.0, 2.0, 2.0, 2.0 );  // XYZ if divide per plane, W is props per switchPlane
-            // float RoomTile      = 2.0;
-            // vec4 PositionOffset = vec4( 0.0, 0.0, 0.0, 0.0 ); // XYZ is planes, W is Props
-            
-            // outColor = vec4( 1.0, 0.0, 0.0, 1.0 );
-
-            // vec4 interVertexPos = vec4( fragOPos, fragOPos.x ); // or W = fragOPos.z if switchPlanes on
-            
-            // mat4 modelMatrixInv = inverse( modelMatrix );
-            // vec4 transCameraPos = modelMatrixInv * vec4( cameraPosition, 1.0 );
-            // transCameraPos.w    = transCameraPos.x; // or W = transCameraPos.z uf switchPlanes is on
-
-
-            //  // -1E-0.5 = -1 * 10^-0.5 = -0.31622776601
-            // vec4 rmTiling = ( Rooms + vec4( -0.31622776601 ) ) * RoomTile;
-            // vec4 usePos   = ( interVertexPos - PositionOffset );
-            // vec4 fUsePos  = floor( usePos * rmTiling );
-            
-            // vec4 V2 = transCameraPos - PositionOffset;  //
-            // vec4 V1 = usePos - V2;
-
-            // vec4 stepV1 = step( vec4( 0.0 ), V1 );
-
-            // vec4 a0 = ( ( fUsePos + stepV1 ) / rmTiling - V2 ) / V1; // Last Division looks sus, get 
-            // float varX = a0.x;
-            // float varY = a0.y;
-            // float varZ = a0.z;
-            // float newPlane = a0.w;
-            // float Y_inverted = V1.y;
-
-            // outColor.rgb = vec3( fract( varX ) );
-        
-            // float backTiling = 2.0;  //BrickWall_1 is back
-            // vec2 backUV      = ( (varX * V1) + V2 ).zy * backTiling;
-            // vec4 backColor   = texture( texBack, backUV );
-
-            // //if( varX > 2.0 ) outColor.rgb = vec3( 1.0, 0.0, 0.0 );
-
-            // outColor.rgb = vec3( backUV, 0.0 );
-            // outColor = backColor;
-
-            // float wallTiling = 2.0;  //BrickWall_1 is back
-            // vec2 wallUV      = ( (varZ * V1) + V2 ).xy * wallTiling;
-            // vec4 wallColor   = texture( texWall, wallUV );
-            // outColor = wallColor;
-
-            // float floorTiling = 2.0;
-            // float ceilTiling = 2.0;
-
-            // vec2 yUV      = ( (varY * V1) + V2 ).xz;
-            // vec2 floorUV  = yUV * floorTiling;
-            // vec2 ceilUV   = yUV * ceilTiling;
-
-            // vec4 floorCol = texture( texFloor, floorUV );
-            // vec4 ceilCol = texture( texCeil, ceilUV );
-            // vec4 ceilColor = mix( floorCol, ceilCol, step( 0.0, Y_inverted ) );
-            // outColor = ceilColor;
-
-
-            // // MIX
-
-            // //float zplane = step( newPlane, varZ );
-            // //outColor.rgb = vec3( zplane );
-            // //float zIf   = ( zplane > 0.0 ) ? newPlane : varZ;
-            // //float xStep = step( zIf, varX );
-
-            
-            // float xIf   = ( step( varZ, varX ) > 0.0 )? varZ : varX;
-
-            // vec4 wallOrBack = ( step( varZ, varX ) > 0.0 )? wallColor : backColor;
-
-            // vec4 paraColor = ( varY > xIf )? wallOrBack : ceilColor;
-            // outColor = paraColor;
-
-            // float facadeTiling = 2.0;
-            // vec2 facadeUV = fragUV * facadeTiling;
-            // outColor.rgb = vec3( facadeUV, 0.0 );
-
-            // vec4 facadeColor = texture( texFacade, facadeUV );
-            // outColor = facadeColor;
-
-            // outColor = mix( paraColor, facadeColor , facadeColor.a );
-
-
-
-            //outColor.rgb = vec3( xStep );
-
-
-
-
-            // vec3 roomCount = vec3( backUV, 0.0, 1.0 );
-
-            // // Move WorldSpace Camera to ObjectSpace
-            // mat4 modelMatrixInv = inverse( modelMatrix );
-            // vec3 osCamDir       = ( modelMatrixInv * vec4( fragOPos - cameraPosition, 0.0 ) ).xyz;
-            // osCamDir           *= roomCount;
-
-            // vec3 osCamDirInv    = 1.0 / osCamDir;
-            
-            // vec3 oPos      = fragOPos * roomCount * 0.99; // 0.99 is to remove some artifacts
-            // vec3 oPosGrad  = fract( oPos ) * 2.0 - 1.0;   // Remap fract between -1 & 1;
-
-            // float cMin     = minComponent( abs( osCamDirInv ) - osCamDirInv * oPosGrad );
-            // vec3 parallax  = osCamDir * cMin + oPosGrad;
-            // //parallax = parallax.xzy;
-            
-            // // outColor = vec4( oPosGrad, 1.0 );
-            // // outColor = vec4( parallax, 1.0 );
-            // outColor  = texture( texCube, parallax );
-
-
-            // // -----------------------------
-            // // Randomize the faces by using Noise
-            // vec3 vHash   = round( hash33( floor( oPos ) ) );   // round so components are either 1 or 0
-            // vec2 rot = ( vHash.xy * 2.0 - 1.0 ) * parallax.xz; // Randomly Rotate Walls, not floor&ceiling
-            // rot      = mix( rot, rot.yx, vHash.g ); // if( vHash.g == 0.0 ) rot = rot.yx;
-
-            // vec3 rotParallax = vec3( rot.x, parallax.y, rot.y );
-
-            // // outColor.rgb = vHash;
-            // // outColor.rgb = vec3( rot, 0. );
-            // outColor  = texture( texCube, rotParallax );
         }`
     });
 
