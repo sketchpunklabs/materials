@@ -1,0 +1,176 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../../lib/Starter.js';
+
+let App;
+let Debug = {};
+let Ref   = {};
+
+window.addEventListener( "load", _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App = new Starter( { webgl2:true, grid:true } );
+	App.setCamera( 0, 20, 2, [0,0.6,0] ).render();
+
+    const texCube = new THREE.CubeTextureLoader()
+        .setPath( '../../assets/imgs/cubemap/' )
+        .load( [
+            'test_xp.jpg',
+            'test_xn.jpg',
+            'test_yp.jpg',
+            'test_yn.jpg',
+            'test_zp.jpg',
+            'test_zn.jpg'
+        ] );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Ref.mat    = customMaterial( texCube );
+    const geo  = new THREE.PlaneGeometry( 1, 1 );
+    const mesh = new THREE.Mesh( geo, Ref.mat );
+    mesh.position.y = 0.6;
+    App.add( mesh );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // UI
+    const onChange = ( id, fn )=>{ document.getElementById( id ).addEventListener( 'change', fn, true ); }
+    const onInput  = ( id, fn )=>{ document.getElementById( id ).addEventListener( 'input', fn, true ); }
+    const fn       = e=>{ Ref.mat[ e.target.id ] = e.target.value; };
+    onInput( 'TilingX', fn );
+    onInput( 'TilingY', fn );
+    onInput( 'OffsetX', fn );
+    onInput( 'OffsetY', fn );
+});
+
+// TODO : Forgot where I found the original source, when found will update with link.
+function customMaterial( texCube ){
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        side            : THREE.DoubleSide,
+
+        uniforms        : { 
+            texCube : { type :'samplerCube', value: texCube },
+            tiling  : { type :'vec2', value:[1,1] },
+            offset  : { type :'vec2', value:[0,0] },
+        },
+
+        extensions      : { derivatives : true },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        void main(){
+            vec4 wPos 	        = modelMatrix * vec4( position, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;                    // View Space
+            
+            fragUV              = uv;
+            fragWPos            = wPos.xyz;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position			= projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+        
+        uniform samplerCube texCube;
+        uniform float uDepth;
+        uniform vec2 tiling;
+        uniform vec2 offset;
+        uniform vec3 cameraPosition;
+
+        in  vec3    fragWPos;
+        in  vec3    fragNorm;
+        in  vec2    fragUV;
+        out vec4    outColor;
+
+        // #####################################################################
+
+        // https://irrlicht.sourceforge.io/forum/viewtopic.php?t=52284
+        // Compute Tangent & BiTangent to create TBN-Matrix
+        // NOTE: smoothNormal is the interpolated normal from the vertex shader without being normalized
+        mat3 tbnMatrix( vec3 smoothNormal, vec3 pos, vec2 uv ){
+            vec3 denormTangent = dFdx( uv.y ) * dFdy( pos ) - dFdx( pos ) * dFdy( uv.y );
+            vec3 tangent       = normalize( denormTangent - smoothNormal * dot( smoothNormal, denormTangent ) );
+ 
+            vec3 norm          = normalize( smoothNormal );
+            vec3 bitangent     = cross( norm, tangent );
+
+            mat3 tbn		   = mat3( tangent, bitangent, norm );
+            return tbn;
+        }
+
+        float minComponent( vec3 v ){ return min( min ( v.x, v.y ), v.z ); }
+
+        // #####################################################################
+        void main(){
+            vec3 norm      = normalize( fragNorm );
+            vec2 uv        = fract( fragUV * tiling + offset );
+
+            vec3 frag2Eye  = normalize( cameraPosition - fragWPos );
+            mat3 tbn       = tbnMatrix( fragNorm, fragWPos, uv );
+
+            // SKETCHPUNK - This lil extra tweak allows the projection to 
+            // somewhat work work behind the plane. If using on a front 
+            // facing only plane this remove this line as its not need. Just here for fun.
+            frag2Eye       = frag2Eye * sign( frag2Eye.z );  
+
+            vec3 tanDir    = normalize( tbn * frag2Eye );    // Move to Eye Direction into Tangent Space
+            vec3 tanDirInv = 1.0 / tanDir;                   // Inverse vector is needed for Parallax math?
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // I believe this is creating a position in Tangent Space.
+            // Taking UV and making the center origin then setting Z 
+            // as the distance where the back plane should be rendered 
+            // away from the front of the plane
+
+            // NOTE : Z can controls depth but need a way to fix
+            // the other 4 faces to repeat when changing depth else
+            // things just leak into the front face texture
+            vec3 pos = vec3( uv * 2.0 - 1.0, -1.0 );
+            
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Not sure what this line does, I suspect its a form of Parallax.
+            // The math is somewhat similar from an old example I have. Its
+            // used as a scalar for the Tangent direction of Frag 2 Eye
+            float fmin = minComponent( abs( tanDirInv ) - tanDirInv * pos );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Compute final direction to use on a cubemap texture
+            tanDir   = tanDir * fmin + pos;
+            outColor = texture( texCube, tanDir );
+        }`
+    });
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // SETTERS
+    Object.defineProperty( mat, 'TilingX', { set: ( v )=>{ mat.uniforms.tiling.value[0] = v; } });
+    Object.defineProperty( mat, 'TilingY', { set: ( v )=>{ mat.uniforms.tiling.value[1] = v; } });
+    Object.defineProperty( mat, 'OffsetX', { set: ( v )=>{ mat.uniforms.offset.value[0] = v; } });
+    Object.defineProperty( mat, 'OffsetY', { set: ( v )=>{ mat.uniforms.offset.value[1] = v; } });
+
+    return mat;
+}
+
+</script>
+
+<style>
+    .row{ display: flex; align-items:center; }
+    label{ width:80px; }
+</style>
+
+<div style="position:fixed; top:10px; left:10px;">
+    <div class="row"><label>Tile X :</label><input type="range" id="TilingX" min="1" max="3" step="1" value="1.0"></div>
+    <div class="row"><label>Tile Y : </label><input type="range" id="TilingY" min="1" max="3" step="1" value="1.0"></div>
+    <div class="row"><label>Offset X :</label><input type="range" id="OffsetX" min="0" max="1" step="0.1" value="0"></div>
+    <div class="row"><label>Offset Y :</label><input type="range" id="OffsetY" min="0" max="1" step="0.1" value="0"></div>
+</div>
+
+</body></html>
