@@ -1,0 +1,130 @@
+<!DOCTYPE html><html lang="en"><head><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script src="../../../import-map.js"></script><script type="module">
+
+import useThreeWebGL2, { THREE, useDarkScene } from '../../lib/useThreeWebGL2.js';
+import ShapePointsMesh     	from '../../lib/meshes/ShapePointsMesh.js';
+import DynLinesMesh        	from '../../lib/meshes/DynLineMesh.js';
+
+import GridAlternative      from '../../lib/meshes/GridAlternative.js';
+import ShaderLib            from '../../lib/shaders/ShaderLib.js';
+
+let App   = useDarkScene( useThreeWebGL2() );
+let Debug = {};
+
+window.addEventListener( 'load', async ()=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App.sphericalLook( 19, 40, 8, [2,0,2] );
+
+	App.scene.add( (Debug.pnt = new ShapePointsMesh() ) );
+    App.scene.add( (Debug.ln  = new DynLinesMesh() ) );
+
+    const mat  = await CustomMaterial();
+    const mesh = GridAlternative.mesh( mat, 2, 2, 120, 120, false, false );
+    mesh.position.y = 0.01;
+
+    App.scene.add( mesh );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.renderLoop();
+});
+
+async function CustomMaterial( baseColor=0xa0a0a0 ){
+    return new THREE.RawShaderMaterial({
+    depthTest       : true,
+    transparent 	: false,
+	side			: THREE.DoubleSide,
+    uniforms        : { 
+        color   : { type :'vec3', value:new THREE.Color( baseColor ) },
+        color_x : { type :'vec3', value:new THREE.Color( "#878FA3" ) }, // Each axis gets a Grayscaled Value, used as strength of baseColor
+        color_y : { type :'vec3', value:new THREE.Color( "#ffffff" ) }, // these don't really need to be modified unless looking to change 
+        color_z : { type :'vec3', value:new THREE.Color( "#CED4E0" ) }, // the overall strength of each axis
+    },
+    
+    vertexShader    : await ShaderLib.Async(`#version 300 es
+    in vec3 position;
+    in vec3 normal;
+    in vec2 uv;
+    
+    uniform mat4 modelMatrix;
+    uniform mat4 viewMatrix;
+    uniform mat4 projectionMatrix;
+
+    out vec3 fragNorm;
+    out vec3 fragWPos;
+    out vec3 fragLPos;
+    out vec2 fragUV;
+    out float fragN;
+   
+    /////////////////////////////////////////////////////////////////
+
+    #include Blender.CommonHash
+    #include Blender.Noise
+    #include Blender.FractalNoise
+    #include Blender.NoiseTexture
+    #include Misc.Ramps.floatLinearRamp
+
+    float valRamp[8] = float[]( 0.0, 0.483, 0.5, 0.579, 1.0, 1.0, 1.0, 1.0 );
+    float wgtRamp[8] = float[]( 0.0, 0.433, 0.513, 0.594, 1.0, 1.0, 1.0, 1.0 );
+
+    /////////////////////////////////////////////////////////////////
+
+    void main(){
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // DISPLACEMENT
+        vec3 pos    = position;
+
+        // Compute noise & apply a "color ramp" to remap the values around the middle
+        float n     = node_noise_texture_2d_mod( pos.xz, 1.5, 4.0, 0.5, 0.0 );
+        n           = floatLinearRamp( valRamp, wgtRamp, n, 5 );
+
+        // Use noise for height... plus give it a lil umph :)
+        pos.y       = n * 1.5;
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        vec4 wPos   = modelMatrix * vec4( pos, 1.0 );
+        fragWPos    = wPos.xyz;
+        fragLPos    = position;
+        fragNorm    = normal;
+        fragUV      = uv;
+        fragN       = n;
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        gl_Position = projectionMatrix * viewMatrix * wPos;
+    }`),
+	
+    fragmentShader  : await ShaderLib.Async(`#version 300 es
+    precision mediump float;
+
+    in vec3  fragNorm;
+    in vec3  fragWPos;
+    in vec3  fragLPos;
+    in vec2  fragUV;
+    in float fragN;
+
+    out vec4  outColor;
+
+    ////////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////////
+
+    vec3 lightPos = vec3( 1.0, 5.0, 1.0 );
+
+    void main(){
+        // Base color using noise from vertex shader
+        outColor = vec4( fragN, fragN, fragN, 1.0 );
+
+        // Create normals using derivitive functions. Makes things look low poly
+        // But since I currently can't compute NORMALS from noise displacement
+        // this will have to do for now.
+        vec3 norm = normalize( cross( dFdx( fragWPos), dFdy( fragWPos ) ) );
+
+        // Do some very basic lighting
+        float diffuse = dot( norm, normalize( lightPos - fragWPos ) );
+        outColor.rgb *= clamp( 0.2, 1.0, diffuse );
+    }`)
+
+    });
+}
+
+</script></body></html>

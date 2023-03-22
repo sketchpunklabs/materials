@@ -1,6 +1,6 @@
 [[ CUBEMAPS ]] =========================================================
 
-https://www.artstation.com/artwork/0nwDlV
+https://www.artstation.com/artwork/0nwDlV ( DO THIS ONE )
 -- Has some extra controls
 
 part 1 https://www.youtube.com/watch?v=2qVSV5dhdb0 
@@ -43,3 +43,27 @@ https://www.artstation.com/blogs/martinwiddowson/ZP4V/interior-mapping-and-build
 https://www.unrealengine.com/marketplace/en-US/product/interior-cubemaps-generic-offices?sessionInvalidated=true
 https://wparallax.gumroad.com/l/YyRmU
 https://www.artstation.com/artwork/W290vD
+
+
+[[ XXXXXXXXX ]] =====================================================
+
+xsimple  ( Plane )
+tangent space, cube map
+
+preproj( Plane )
+tangent space, pre-projected texture
+
+planes ( Cube )
+object space, face + facade textures
+
+other planes ( Plane )
+object space, face textures
+
+other ( Cube )
+targent space, random, cubemap 
+
+other_objspace ( Cube )
+object space, cube map
+
+Dual Depth ( Plane )
+Tangent Space, 

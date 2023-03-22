@@ -1,0 +1,338 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../../lib/Starter.js';
+import Suzanne              from '../lib/Suzanne.js';
+import Cube                 from '../../lib/meshes/Cube.js';
+import Sphere               from '../../lib/meshes/Sphere.js';
+
+let App;
+let Debug = {};
+let Ref   = {};
+
+window.addEventListener( "load", async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App = new Starter( { webgl2:false, grid:true, lights:true } );
+    App.setCamera( 20, 20, 5, [0, 0.5, 0] );
+    App.onRender = onRender;
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const tex  = new THREE.TextureLoader().load( '../../assets/imgs/normals/glass_frosted.jpg' );
+    // tex.flipY  = true;
+    // tex.wrapS  = THREE.ClampToEdgeWrapping; //THREE.RepeatWrapping;
+    // tex.wrapT  = THREE.ClampToEdgeWrapping; //THREE.RepeatWrapping;
+
+    // const tex2 = new THREE.TextureLoader().load( '../../assets/imgs/textures/colored_squares.png' );
+    const tex2 = new THREE.TextureLoader().load( '../../assets/imgs/textures/checker_map.jpg' );
+
+    const mat  = customMaterial( tex, tex2 );
+    // App.add( Cube.mesh( { mat, pos:[0,0.5,0] } ) );
+
+    const geo = new THREE.BoxGeometry( 1, 1, 1 );
+    const mesh = new THREE.Mesh( geo, mat );
+    mesh.position.y = 0.5;
+    App.add( mesh );
+
+
+    // App.add( Sphere( { mat, pos:[-2,0.5,0], radius:0.5 } ) );
+    // App.add( await Suzanne( mat ) );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.render();
+});
+
+function onRender( dt, et ){
+}
+
+// ORIGINAL SOURCE BY Caleb Miller @cmiller__
+// https://twitter.com/cmiller__/status/1598498814666498049?s=20&t=jsoXEOgl27IHAxKJ6yCtJQ
+// https://codepen.io/MillerTime/pen/RwJyGMW
+
+function customMaterial( tex01, tex02 ){
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        // transparent 	: true, 
+        // side            : THREE.DoubleSide,
+        // lights          : true,
+
+        uniforms        : { 
+            tex01 : { type :'sampler2D', value: tex01 },    // Normal Map
+            tex02 : { type :'sampler2D', value: tex02 },    // Deffuse Map
+        },
+
+        extensions      : { 
+            derivatives : true
+        },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mat4    modelMatrix;
+        uniform     mat4    modelViewMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragVPos;  // View Space Position
+        out vec3    fragNorm;
+        out vec3    fragVNorm;
+        out vec2    fragUV;
+        
+        void main(){
+            vec4 wPos 	        = modelMatrix * vec4( position, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;                    // View Space
+            
+            fragUV              = uv;
+            fragWPos            = wPos.xyz;
+            fragVPos            = vPos.xyz;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+            fragVNorm           = ( modelViewMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position			= projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+        
+        uniform sampler2D tex01;
+        uniform sampler2D tex02;
+        uniform vec3 cameraPosition;
+
+        in  vec3    fragWPos;
+        in  vec3    fragVPos;
+        in  vec3    fragNorm;
+        in  vec3    fragVNorm;
+        in  vec2    fragUV;
+        out vec4    outColor;
+
+        const vec3 lightPos = vec3( 5.0, 5.0, 5.0 );
+
+        // #####################################################################
+
+
+        /**
+             * Lighting contribution of a single point light source via Phong illumination.
+             * 
+             * The vec3 returned is the RGB color of the light's contribution.
+             *
+             * k_d: Diffuse color
+             * k_s: Specular color
+             * alpha: Shininess coefficient
+             * p: position of point being lit
+             * n: normal of point being lit
+             * eye: the position of the camera
+             * lightPos: the position of the light
+             * lightIntensity: color/intensity of the light
+             *
+             * See https://en.wikipedia.org/wiki/Phong_reflection_model#Description
+             */
+            vec3 phongContribForLight(vec3 k_d, vec3 k_s, float alpha, vec3 p, vec3 n, vec3 eye, vec3 lightPos, vec3 lightIntensity) {
+                vec3 N = n;
+                vec3 L = normalize( lightPos - p );
+                vec3 V = normalize( eye - p );
+                vec3 R = normalize( reflect( -L, N ) );
+
+                float dotLN = dot(L, N);
+                float dotRV = dot(R, V);
+
+                // Light not visible from this point on the surface
+                if( dotLN < 0.0 ) return vec3( 0.0, 0.0, 0.0 );
+
+                // Clamp added to prevent harsh lighting transitions at high reflection angles
+                dotLN = clamp( dotLN, 0.0, 1.0 );
+
+                // Light reflection in opposite direction as viewer, apply only diffuse component
+                if (dotRV < 0.0) return lightIntensity * ( k_d * dotLN );
+
+                return lightIntensity * ( k_d * dotLN + k_s * pow( dotRV, alpha ) );
+            }
+
+
+        // https://irrlicht.sourceforge.io/forum/viewtopic.php?t=52284
+        // Compute Tangent & BiTangent to create TBN-Matrix
+        // NOTE: smoothNormal is the interpolated normal from the vertex shader without being normalized
+        mat3 tbnMatrix( vec3 smoothNormal, vec3 pos, vec2 uv ){
+            vec3 denormTangent = dFdx( uv.y ) * dFdy( pos ) - dFdx( pos ) * dFdy( uv.y );
+            vec3 tangent       = normalize( denormTangent - smoothNormal * dot( smoothNormal, denormTangent ) );
+ 
+            vec3 norm          = normalize( smoothNormal );
+            vec3 bitangent     = cross( norm, tangent );
+
+            mat3 tbn		   = mat3( tangent, bitangent, norm );
+            return tbn;
+        }
+
+        // #####################################################################
+        void main(){
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Create TBN Matrix which converts Tangent Space to World Space
+            mat3 tbn      = tbnMatrix( fragVNorm, fragVPos, fragUV );
+            mat3 tbnInv   = transpose( tbn ); // go from WS to TS
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+            vec3 tanPos     = tbnInv * fragVPos;
+            vec3 tanCamPos  = vec3( 0.0 ); //tbnInv * cameraPosition;
+            vec3 tanViewDir = normalize( tanCamPos - tanPos );
+
+            float depth         = 0.1;
+            vec2 parallaxOffset = tanViewDir.xy * depth / tanViewDir.z;
+            vec2 laxUV          = fragUV + parallaxOffset;
+
+            outColor = vec4( 0.0, 0.0, 0.0, 1.0 );
+            if (laxUV.x >= 0.1 && laxUV.x <= 0.9 && laxUV.y >= 0.1 && laxUV.y <= 0.9 ) {
+                outColor.rgb = texture( tex02, laxUV ).rgb;
+            }
+
+
+            // vec3 surfNorm = texture( tex01, fragUV ).xyz * 2.0 - 1.0; // * 255.0/127.0 - 128.0/127.0;
+            // surfNorm      = normalize( tbn * surfNorm );
+
+            // vec3 surfNorm   = normalize( texture( tex01, fragUV ).xyz * 2.0 - 1.0 ); // IN TANGENT SPACE
+
+            // float indexOfRefraction = 1.4;
+            // vec3 tanRefractViewDir  = normalize( -refract( -tanViewDir, surfNorm, 1.0/indexOfRefraction ) );
+            
+            
+            // vec3 viewDir  = normalize( cameraPosition - fragWPos );
+            // vec3 lightDir = normalize( lightPos - fragWPos );
+
+
+            // outColor.a      = 1.0;
+            // outColor.rgb    = tanRefractViewDir;
+
+   
+
+            
+
+            // Refract view ray through bumpy glass
+            // float indexOfRefraction = 1.4;
+            // vec3 refractedViewDir   = normalize( -refract( -viewDir, surfNorm, 1.0/indexOfRefraction ) );
+
+            // Offset UV for parallax effect (simple, but works well for a consistent depth)
+            // Note we can swap "refractedViewDir" for "viewDir" to lose the refraction effect
+            // float depth = 0.25;
+            // vec2 parallaxOffset = refractedViewDir.xy * depth / refractedViewDir.z;
+            // vec2 uv = fragUV - parallaxOffset;
+            // uv = fragUV;
+
+            // Inner cube color uses parallax shifted UV
+            // Also create an "empty border" around texture
+            // outColor = vec4( 0.0, 0.0, 0.0, 1.0 );
+            // if (uv.x >= 0.1 && uv.x <= 0.9 && uv.y >= 0.1 && uv.y <= 0.9 ) {
+            //     outColor.rgb = texture( tex02, uv ).rgb;
+            // }
+
+
+            // No bump map for the "inner object", so the flat normal is simply +Z.
+            // We could sample a normal map instead here...
+            // float diffuse = max( dot( lightDir, fragNorm ), 0.0 ) * 0.75 + 0.25;
+            // outColor.rgb *= diffuse;
+					
+            // Add Phong specular reflection on surface
+            // float shininess = 120.0;
+            // vec3 lightColor = vec3(0.9, 0.9, 0.9);
+            // vec3 black = vec3(0.0, 0.0, 0.0);
+            // vec3 white = vec3(1.0, 1.0, 1.0);
+            // // phongContribForLight(vec3 k_d, vec3 k_s, float alpha, vec3 p, vec3 n, vec3 eye, vec3 lightPos, vec3 lightIntensity) {
+            // vec3 specularValue = phongContribForLight( 
+            //     black, white, shininess, fragWPos, surfNorm, cameraPosition, lightPos, lightColor );
+
+            // outColor.rgb = vec3( specularValue );
+
+
+            // Background reflection on glass at grazing angles
+            // float fresnel = 1.0 - max( dot( viewDir, surfNorm ), 0.0 );
+            // vec3 envColor = vec3(0.134, 0.150, 0.188);
+            // vec3 reflectionColor = fresnel * fresnel * envColor;
+
+            // outColor.rgb = reflectionColor;
+
+            // // Fill in opaque detail on surface
+            // 		vec3 surfaceColor = vec3(0.1, 0.1, 0.1);
+            // 		baseColor = mix( outColor, surfaceColor, surfaceAlpha);
+					
+            // outColor.rgb = outColor.rgb + specularValue + reflectionColor;
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // outColor = vec4( 1.0, 0.0, 0.0, 1.0 );
+            // outColor = texture( tex01, fragUV );
+            // outColor.rgb = refractedViewDir;
+
+            // outColor = texture( tex02, uv );
+            // outColor.rgb = surfNorm;
+        }`
+    });
+
+    return mat;
+}
+
+
+
+/*
+mat3( transpose( inverse( model.view_matrix ) ) ) * a_norm;
+
+// I learned a lot about normal/parallax mapping from this article + demo:
+// https://apoorvaj.io/exploring-bump-mapping-with-webgl/
+vertexShader: `
+    // THREE doesn't seem to add the "tangent" attribute automatically when we compute the tangents.
+    // The attribute data is there, we just need to declare it here.
+    attribute vec4 tangent;
+    
+    varying vec3 v_normal;
+    varying vec2 v_uv;
+    varying vec3 v_fragPos;
+    varying vec3 v_viewPos;
+    varying vec3 v_lightPos;
+
+    void main() {
+        // Compute the bitangent at runtime - it's not too expensive per-vertex.
+        // Often this is another vertex attribute, but "BufferGeometry.computeTangents()" doesn't store it as an attribute.
+        // For now, I didn't feel like figuring out the best way to compute these on the CPU, but it could be done :)
+        vec3 bitangent = cross(normal, tangent.xyz);
+        
+        // Now that we have all three tangent space basis vectors, transform them to align with the model transform.
+        vec3 t = normalize(normalMatrix * tangent.xyz);
+        vec3 b = normalize(normalMatrix * bitangent);
+        vec3 n = normalize(normalMatrix * normal);
+        // Finally, generate a 3x3 matrix that converts from world space to tangent space.
+        // Apparently the base matrix goes from tangent space to world space, and to go the other direction
+        // we have to take the inverse of it. However, since we don't have any shearing/skewing happening,
+        // an equivalent operation is the transpose, which is faster. If this doesn't work for a future project,
+        // just be aware that what we really need might be an inverse 3x3 matrix function.
+        // I didn't know there is a built-in transpose function, but we get an error if we define our own.
+        // Maybe threejs is providing this? If there are ever any errors porting this code (e.g. to regl),
+        // we may need to define a custom transpose() - I have an implementation commented up above.
+        mat3 tbn = transpose(mat3(t, b, n));
+        
+        // The following code is designed to work in world space.
+        // However it turns out the normalMatrix three.js provides is based on the modelViewMatrix, not just the modelMatrix.
+        // So, we actually need to convert everything into view space, not world space, to be compatible with the given normalMatrix.
+        // If I ever build a similar system myself, I may use a world-relative normal matrix and world space coordinates.
+        // ------------------------------------------------------
+        // vec3 vertPositionWorld = (modelMatrix * vec4(position, 1.0)).xyz;
+        // vec3 lightPosWorld = vec3(1.0, 4.0, 0.0);
+        // v_uv = uv;
+        // v_fragPos = tbn * vertPositionWorld;
+        // v_viewPos = tbn * cameraPosition;
+        // v_lightPos = tbn * lightPosWorld;
+        
+        // FIXED VERSION CONVERTING EVERYTHING TO VIEW SPACE
+        // ------------------------------------------------------
+        vec3 vertPositionView = (modelViewMatrix * vec4(position, 1.0)).xyz;
+        vec3 lightPosWorld = vec3(1.0, 4.0, 0.0);
+        vec3 lightPosView = (viewMatrix * vec4(lightPosWorld, 1.0)).xyz;
+        
+        // Local UV coordinates should not be modified.
+        v_uv = uv;
+        // All world space values must be transformed into tangent space.
+        v_fragPos = tbn * vertPositionView;
+        v_viewPos = vec3(0.0, 0.0, 0.0); // in view space, camera is always at (0, 0, 0)
+        v_lightPos = tbn * lightPosView;
+        
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+*/
+
+
+</script></body></html>

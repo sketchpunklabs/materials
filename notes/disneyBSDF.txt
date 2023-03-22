@@ -1,0 +1,77 @@
+Chat AI Created this
+
+#version 330
+
+uniform vec3 u_albedo;
+uniform float u_metallic;
+uniform float u_specular;
+uniform float u_specularTint;
+uniform float u_anisotropic;
+uniform float u_sheen;
+uniform float u_sheenTint;
+uniform float u_clearcoat;
+uniform float u_clearcoatGloss;
+uniform vec3 u_camPos;
+
+in vec3 v_normal;
+in vec3 v_position;
+in vec2 v_uv;
+
+out vec4 fragColor;
+
+vec3 disneyDiffuse(vec3 N, vec3 L, vec3 V, vec3 albedo) {
+    float diffuse = max(dot(N, L), 0.0);
+    return albedo * diffuse;
+}
+
+vec3 disneySpecular(vec3 N, vec3 L, vec3 V, vec3 albedo, float metallic, float specular, float specularTint) {
+    float dotNL = max(dot(N, L), 0.0);
+    float dotNV = max(dot(N, V), 0.0);
+    vec3 H = normalize(L + V);
+    float dotNH = max(dot(N, H), 0.0);
+    float dotLH = max(dot(L, H), 0.0);
+
+    float F = fresnelSchlick(dotLH, specular);
+    float D = disneyD(dotNH, metallic, specularTint);
+    float G = disneyG(dotNL, dotNV);
+
+    return albedo * F * D * G / (4.0 * dotNL * dotNV);
+}
+
+float disneyD(float dotNH, float metallic, float specularTint) {
+    float a = 0.1 + (1.0 - 0.1) * pow(1.0 - dotNH, 5.0);
+    float b = 1.0 - (1.0 - metallic) * (1.0 - specularTint);
+    return a * b;
+}
+
+float disneyG(float dotNL, float dotNV) {
+    return min(1.0, min(2.0 * dotNH * dotNV / dotNV, 2.0 * dotNH * dotNL / dotNV));
+}
+
+float fresnelSchlick(float dotLH, float specular) {
+    return specular + (1.0 - specular) * pow(1.0 - dotLH, 5.0);
+}
+
+vec3 disneySheen(vec3 N, vec3 L, vec3 V, float sheen, float sheenTint) {
+    float dotNV = max(dot(N, V), 0.0);
+    return sheen * mix(vec3(1.0), u_albedo, sheenTint) * pow(dotNV, 0.5);
+}
+
+vec3 disneyClearcoat(vec3 N, vec3 L, vec3 V, float clearcoat, float clearcoatGloss) {
+    float dotNV = max(dot(N, V), 0.0);
+    float F = fresnelSchlick(dot(N, H), 0.04);
+    float D = disneyD(dotNH, clearcoatGloss, 1.0);
+    float G = disneyG(dotNL, dotNV);
+    return clearcoat * F * D * G / (dotNL * dotNV);
+}
+
+void main() {
+    vec3 N = normalize(v_normal);
+    vec3 V = normalize(u_camPos - v_position);
+    vec3 L = vec3(0); // Assumes an already lit scene
+    vec3 color = disneyDiffuse(N, L, V, u_albedo);
+    color += disneySpecular(N, L, V, u_albedo, u_metallic, u_specular, u_specularTint);
+    color += disneySheen(N, L, V, u_sheen, u_sheenTint);
+    color += disneyClearcoat(N, L, V, u_clearcoat, u_clearcoatGloss);
+    fragColor = vec4(color, 1);
+}

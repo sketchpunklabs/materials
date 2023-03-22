@@ -1,6 +1,7 @@
 <!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
 import Starter, { THREE }   from '../lib/Starter.js';
 import ShaderDict           from '../lib/shaders/ShaderDict.js';
+import ShaderLib            from '../lib/shaders/ShaderLib.js';
 
 let App;
 
@@ -9,23 +10,16 @@ window.addEventListener( "load", async _=>{
 	App = new Starter( { webgl2:false, grid:true } );
 	App.setCamera( 0, 20, 2 ).render();
 
-	await ShaderDict.bulk([ 
-        './pkg/Constants.js',
-        './pkg/Funcs.js',
-        './pkg/noise/PerlinNoise.js',
-        './pkg/noise/VoroNoise.js',
-    ]);
-
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-	const geo  = new THREE.PlaneGeometry( 1, 1 );
-	const mat  = CustomMaterial();
-	const mesh = new THREE.Mesh( geo, mat );
+    const geo  = new THREE.PlaneGeometry( 1, 1 );
+    const mat  = await CustomMaterial();
+    const mesh = new THREE.Mesh( geo, mat );
 
     App.add( mesh );
 });
 
 
-function CustomMaterial(){
+async function CustomMaterial(){
     return new THREE.RawShaderMaterial({
     depthTest       : true,
     transparent 	: false,
@@ -58,7 +52,7 @@ function CustomMaterial(){
         gl_Position = projectionMatrix * viewMatrix * wPos;
     }`,
 	
-    fragmentShader  : ShaderDict`#version 300 es
+    fragmentShader  : await ShaderLib.Async(`#version 300 es
     precision mediump float;
 
     in vec3 fragNorm;
@@ -70,11 +64,11 @@ function CustomMaterial(){
     ////////////////////////////////////////////////////////////////////////
 
     #include Constants
-    #include Funcs.rotateUV
-    #include PerlinNoise.fbmOptions
-    #include PerlinNoise.2D
-    #include PerlinNoise.2D_fbm
-    #include VoroNoise
+    #include Misc.Funcs.rotateUV
+    #include Noise.Perlin.fbmOptions
+    #include Noise.Perlin.2D
+    #include Noise.Perlin.2D_fbm
+    #include Noise.VoroNoise
 
     ////////////////////////////////////////////////////////////////////////
 
@@ -101,12 +95,14 @@ function CustomMaterial(){
 
         fbmOptions opts = fbmOptions( 0.0, 0.5, 1.0, 3.5, 0.3, 4, false, false );
         outColor.rgb = vec3( perlinNoise_fbm( fragUV, opts ) );
-        //outColor.rgb = vec3( voroNoise( fragUV * 8.0, 1.0, 1.0 ) );
+        // outColor.rgb = vec3( voroNoise( fragUV * 8.0, 1.0, 1.0 ) );
 
         float v         = sin( uv.y * ( TAU * sineFreq ) );
 
         //outColor.rgb = vec3( v );        
-    }`});
+    }`)
+
+    });
 }
 
 

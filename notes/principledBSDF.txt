@@ -1,0 +1,165 @@
+#version 330
+
+ u_baseColor: vec3(1.0, 1.0, 1.0)
+u_metallic: 0.0
+u_specular: 0.5
+u_specularTint: 0.0
+u_roughness: 0.5
+u_anisotropy: 0.0
+u_clearcoat: 0.0
+u_clearcoatRoughness: 0.0
+u_normal: 0.0
+u_ambientLight: 0.03
+
+uniform vec3 u_baseColor;
+uniform float u_metallic;
+uniform float u_specular;
+uniform float u_specularTint;
+uniform float u_roughness;
+uniform float u_anisotropy;
+uniform float u_clearcoat;
+uniform float u_clearcoatRoughness;
+uniform float u_normal;
+uniform vec3 u_camPos;
+
+in vec3 v_position;
+in vec3 v_normal;
+in vec2 v_uv;
+
+out vec4 fragColor;
+
+vec3 SchlickFresnel(vec3 F0, float dotLH)
+{
+    return F0 + (1.0 - F0) * pow(1.0 - dotLH, 5.0);
+}
+
+float DistributionGGX(vec3 N, vec3 H, float roughness)
+{
+    float a = roughness*roughness;
+    float a2 = a*a;
+    float NdotH = max(dot(N, H), 0.0);
+    float NdotH2 = NdotH*NdotH;
+
+    float numerator = a2;
+    float denominator = (NdotH2 * (a2 - 1.0) + 1.0);
+    denominator = PI * denominator * denominator;
+
+    return numerator / denominator;
+}
+
+float GeometrySchlickGGX( float NdotV, float roughness ){
+    float r             = ( roughness + 1.0 );
+    float k             = ( r * r ) / 8.0;
+    float numerator     = NdotV;
+    float denominator   = NdotV * ( 1.0 - k ) + k;
+    return numerator / denominator;
+}
+
+float GeometrySmith( vec3 N, vec3 V, vec3 L, float roughness ){
+    float NdotV = max(dot(N, V), 0.0);
+    float NdotL = max(dot(N, L), 0.0);
+    float ggx2  = GeometrySchlickGGX( NdotV, roughness );
+    float ggx1  = GeometrySchlickGGX( NdotL, roughness );
+
+    return ggx1 * ggx2;
+}
+
+vec3 BRDF_Specular_GGX(vec3 N, vec3 V, vec3 L, vec3 F0, float roughness)
+{
+    vec3 H = normalize(V + L);
+
+    float D = DistributionGGX(N, H, roughness);
+    float G = GeometrySmith(N, V, L, roughness);
+    vec3 F = SchlickFresnel(F0, dot(H, V));
+
+    return D * G * F / 4.0;
+}
+
+void main()
+{
+    vec3 N = normalize(v_normal);
+    vec3 V = normalize(u_camPos - v_position);
+    vec3 L = vec3(0); // Assumes an already lit scene
+
+    float NdotL = max(dot(N, L), 0.0);
+    float NdotV = max(dot(N, V), 0.0);
+
+    vec3 baseColor = u_baseColor;
+    vec3 F0 = mix(vec3(0.04), baseColor, u_specular);
+    F0 = mix(F0, baseColor, u_specularTint);
+
+    vec3 diffuse = baseColor * (1.0 - u_metallic) * (1.0 - u_specular) * (1.0 - u_clearcoat);
+    vec3 specular = BRDF_Specular_GGX(N, V, L, F0, u_roughness);
+
+    vec3 finalColor = diffuse + specular;
+    fragColor = vec4(finalColor, 1.0);
+}
+
+
+void main()
+{
+    vec3 N = normalize(v_normal);
+    vec3 V = normalize(u_camPos - v_position);
+    vec3 L;
+    vec3 diffuse = vec3(0);
+    vec3 specular = vec3(0);
+    vec3 ambient = u_ambientLight * u_baseColor;
+
+    for (int i = 0; i < NUM_LIGHTS; i++) {
+        if (u_lightType[i] == 0) {
+            L = normalize(u_lightPositions[i] - v_position);  // Point Light
+        } else {
+            L = -normalize(u_lightPositions[i]); // Direction Light
+        }
+        diffuse += max(dot(N, L), 0.0) * u_lightColors[i] * (1.0 - u_metallic);
+        specular += BRDF_Specular_GGX(N, V, L, F0, u_roughness) * u_lightColors[i];
+    }
+    vec3 finalColor = diffuse + specular + ambient;
+    fragColor = vec4(finalColor, 1.0);
+}
+
+vec3 Clearcoat(vec3 N, vec3 V, vec3 L, float clearcoat, float clearcoatRoughness) {
+    vec3 H = normalize(V + L);
+    float NdotH = max(dot(N, H), 0.0);
+    float clearcoatSpecular = pow(NdotH, clearcoat);
+    float clearcoatDiffuse = clearcoatSpecular * (1.0 - clearcoatRoughness);
+    return clearcoatDiffuse + clearcoatSpecular;
+}
+
+vec3 finalColor = diffuse + specular + Clearcoat(N, V, L, u_clearcoat, u_clearcoatRoughness) + ambient;
+
+float clearcoat = Clearcoat(N, V, L, u_clearcoat, u_clearcoatRoughness, u_clearcoatAnisotropy, u_clearcoatAnisotropyRotation);
+vec3 finalColor = diffuse + specular + clearcoat * u_baseColor + ambient;
+
+with anisotropy
+vec3 Clearcoat(vec3 N, vec3 V, vec3 L, float clearcoat, float clearcoatRoughness, float anisotropy) {
+    vec3 H = normalize(V + L);
+    float NdotH = max(dot(N, H), 0.0);
+    float clearcoatSpecular = pow(NdotH, clearcoat);
+    float clearcoatDiffuse = clearcoatSpecular * (1.0 - clearcoatRoughness);
+
+    // Anisotropy calculation
+    float anisotropyRotation = u_anisotropy * PI;
+    float anisotropyScale = mix(1.0, clearcoatRoughness, u_anisotropy);
+    vec2 anisotropy = vec2(cos(anisotropyRotation), sin(anisotropyRotation)) * anisotropyScale;
+    vec2 brdfSample = vec2(dot(H, N), NdotH) * anisotropy;
+    clearcoatSpecular *= 0.25 / (0.25 + brdfSample.x * brdfSample.x + brdfSample.y * brdfSample.y);
+
+    return clearcoatDiffuse + clearcoatSpecular;
+}
+
+
+vec3 Clearcoat(vec3 N, vec3 V, vec3 L, float clearcoat, float clearcoatRoughness, float anisotropy, float anisotropyRotation) {
+    vec3 H = normalize(V + L);
+    float NdotH = max(dot(N, H), 0.0);
+    float clearcoatSpecular = pow(NdotH, clearcoat);
+    float clearcoatDiffuse = clearcoatSpecular * (1.0 - clearcoatRoughness);
+
+    // Anisotropy calculation
+    float anisotropyScale = mix(1.0, clearcoatRoughness, anisotropy);
+    mat2 anisotropyRotationMatrix = mat2(cos(anisotropyRotation), -sin(anisotropyRotation), sin(anisotropyRotation), cos(anisotropyRotation));
+    vec2 anisotropySample = vec2(dot(N, V), dot(N, L)) * anisotropyScale * anisotropyRotationMatrix;
+    clearcoatSpecular *= 0.25 / (0.25 + anisotropySample.x * anisotropySample.x + anisotropySample.y * anisotropySample.y);
+
+    return clearcoatDiffuse + clearcoatSpecular;
+}

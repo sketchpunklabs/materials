@@ -1,0 +1,160 @@
+#define MAX_RECT_LIGHTS 1
+
+//uniforms to pass light parameters to the fragment shader
+uniform vec3 u_light_position[MAX_RECT_LIGHTS];  //position of the rectangular light
+uniform vec3 u_light_color[MAX_RECT_LIGHTS];     //color of the rectangular light
+uniform vec3 u_light_direction[MAX_RECT_LIGHTS]; //direction of the rectangular light
+uniform vec2 u_light_size[MAX_RECT_LIGHTS];      //size of the rectangular light (width and height)
+
+//varying variables passed from vertex shader
+varying vec3 v_normal;   //surface normal
+varying vec3 v_position; //vertex position
+
+void main() {
+    vec3 normal = normalize(v_normal);  //normalizing the surface normal
+    vec3 light_direction = normalize(u_light_direction[0]);  //normalizing the light direction
+    
+    //calculating the distance from fragment position to the light position along the light direction
+    vec3 light_to_frag = v_position - u_light_position[0];
+    float dist = dot(light_to_frag, light_direction);
+    
+    //projecting fragment position to the rectangular light plane
+    vec3 projected_point = v_position - dist * light_direction;
+    
+    //calculating the distance of the projected point to the edges of the rectangular light
+    vec2 dist_to_edge = abs(projected_point.xy - u_light_position[0].xy) - u_light_size[0];
+    
+    //if fragment is outside of the rectangular light, discard it.
+    if(dist_to_edge.x > 0.0 || dist_to_edge.y > 0.0) {
+        discard;
+    }
+    //calculating the diffuse lighting by taking the dot product of the surface normal and the light direction
+    float diffuse = max(dot(normal, light_direction), 0.0);
+    
+    //multiply the diffuse lighting value by the light color
+    vec3 diffuse_color = diffuse * u_light_color[0];
+    
+    //setting the final fragment color
+    gl_FragColor = vec4(diffuse_color, 1.0);
+}
+
+//-------------------------------------------------------------------------
+
+#define MAX_RECT_LIGHTS 1
+#define SPECULAR_EXPONENT 10.0
+
+//uniforms to pass light parameters to the fragment shader
+uniform vec3 u_light_position[MAX_RECT_LIGHTS];  //position of the rectangular light
+uniform vec3 u_light_color[MAX_RECT_LIGHTS];     //color of the rectangular light
+uniform vec3 u_light_direction[MAX_RECT_LIGHTS]; //direction of the rectangular light
+uniform vec2 u_light_size[MAX_RECT_LIGHTS];      //size of the rectangular light (width and height)
+uniform vec3 u_view_direction;                   //direction of the view
+
+//varying variables passed from vertex shader
+varying vec3 v_normal;   //surface normal
+varying vec3 v_position; //vertex position
+
+void main() {
+    vec3 normal = normalize(v_normal);  //normalizing the surface normal
+    vec3 light_direction = normalize(u_light_direction[0]);  //normalizing the light direction
+    
+    //calculating the distance from fragment position to the light position along the light direction
+    vec3 light_to_frag = v_position - u_light_position[0];
+    float dist = dot(light_to_frag, light_direction);
+    
+    //projecting fragment position to the rectangular light plane
+    vec3 projected_point = v_position - dist * light_direction;
+    
+    //calculating the distance of the projected point to the edges of the rectangular light
+    vec2 dist_to_edge = abs(projected_point.xy - u_light_position[0].xy) - u_light_size[0];
+    
+    //if fragment is outside of the rectangular light, discard it.
+    if(dist_to_edge.x > 0.0 || dist_to_edge.y > 0.0) {
+        discard;
+    }
+    //calculating the diffuse lighting by taking the dot product of the surface normal and the light direction
+    float diffuse = max(dot(normal, light_direction), 0.0);
+    vec3 diffuse_color = diffuse * u_light_color[0];
+    
+    //calculating the specular lighting
+    vec3 reflect_direction = reflect(-light_direction, normal);
+    float specular = pow(max(dot(reflect_direction, normalize(u_view_direction)), 0.0), SPECULAR_EXPONENT);
+    vec3 specular_color = specular * u_light_color[0];
+    
+    //setting the final fragment color
+    gl_FragColor = vec4(diffuse_color + specular_color, 1.0);
+}
+
+//-------------------------------------------------------------------------
+
+#define MAX_CIRCLE_LIGHTS 1
+
+//uniforms to pass light parameters to the fragment shader
+uniform vec3 u_light_position[MAX_CIRCLE_LIGHTS];  //position of the circular light
+uniform vec3 u_light_color[MAX_CIRCLE_LIGHTS];     //color of the circular light
+uniform float u_light_radius[MAX_CIRCLE_LIGHTS];   //radius of the circular light
+
+//varying variables passed from vertex shader
+varying vec3 v_normal;   //surface normal
+varying vec3 v_position; //vertex position
+
+void main() {
+    vec3 normal = normalize(v_normal);  //normalizing the surface normal
+    vec3 light_to_frag = v_position - u_light_position[0]; //vector from fragment to light
+    float dist = length(light_to_frag); //distance from fragment to light
+    //if fragment is outside of the circular light, discard it.
+    if(dist > u_light_radius[0]) {
+        discard;
+    }
+    //calculating the diffuse lighting by taking the dot product of the surface normal and the vector from fragment to light
+    float diffuse = max(dot(normal, light_to_frag) / (dist * dist), 0.0);
+    //multiply the diffuse lighting value by the light color
+    vec3 diffuse_color = diffuse * u_light_color[0];
+    //setting the final fragment color
+    gl_FragColor = vec4(diffuse_color, 1.0);
+}
+
+//-------------------------------------------------------------------------
+
+#define MAX_DIR_LIGHTS 1
+
+//uniforms to pass light parameters to the fragment shader
+uniform vec3 u_light_direction[MAX_DIR_LIGHTS];  //direction of the directional light
+uniform vec3 u_light_color[MAX_DIR_LIGHTS];      //color of the directional light
+
+//varying variables passed from vertex shader
+varying vec3 v_normal;   //surface normal
+
+void main() {
+    vec3 normal = normalize(v_normal);  //normalizing the surface normal
+    vec3 light_direction = normalize(u_light_direction[0]);  //normalizing the light direction
+    //calculating the diffuse lighting by taking the dot product of the surface normal and the light direction
+    float diffuse = max(dot(normal, light_direction), 0.0);
+    //multiply the diffuse lighting value by the light color
+    vec3 diffuse_color = diffuse * u_light_color[0];
+    //setting the final fragment color
+    gl_FragColor = vec4(diffuse_color, 1.0);
+}
+
+//-------------------------------------------------------------------------
+// THIS MIGHT BE GOOD TO RENDER WATER AS WATER JUST REFLEXS THE COLORS OF THE SKY
+
+#define MAX_HEMI_LIGHTS 1
+
+//uniforms to pass light parameters to the fragment shader
+uniform vec3 u_light_color[MAX_HEMI_LIGHTS];      //color of the hemisphere light
+uniform vec3 u_light_ground_color[MAX_HEMI_LIGHTS];//ground color of the hemisphere light
+uniform vec3 u_light_direction[MAX_HEMI_LIGHTS];   //direction of the hemisphere light
+
+//varying variables passed from vertex shader
+varying vec3 v_normal;   //surface normal
+
+void main() {
+    vec3 normal = normalize(v_normal);  //normalizing the surface normal
+    vec3 light_direction = normalize(u_light_direction[0]);  //normalizing the light direction
+    //calculating the diffuse lighting by taking the dot product of the surface normal and the light direction
+    float diffuse = max(dot(normal, light_direction), 0.0);
+    vec3 diffuse_color = mix(u_light_ground_color[0], u_light_color[0], diffuse);
+    //setting the final fragment color
+    gl_FragColor = vec4(diffuse_color, 1.0);
+}

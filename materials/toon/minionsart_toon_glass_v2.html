@@ -1,0 +1,271 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../../lib/Starter.js';
+import Suzanne              from '../lib/Suzanne.js';
+// import Cube                 from '../../lib/meshes/Cube.js';
+import Sphere               from '../../lib/meshes/Sphere.js';
+import Cylinder             from '../../lib/meshes/Cylinder.js';
+
+let App;
+let Debug = {};
+let Ref   = {};
+
+window.addEventListener( "load", async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App = new Starter( { webgl2:false, grid:true, lights:true } );
+    App.setCamera( 0, 20, 4, [0, 0.5, 0] );
+    App.onRender = onRender;
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const mat  = customMaterial();
+    // App.add( Cube.floor( { mat, pos:[2,0,0], scl:1 } ) );
+    App.add( Sphere( { mat, pos:[1.5,0.5,0], radius:0.5, scl:1 } ) );
+    App.add( Cylinder( { mat, pos:[-1.5,0.5,0], radius:0.5} ) );
+    App.add( await Suzanne( mat, [0,0.6,0] ) );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.render();
+});
+
+function onRender( dt, et ){
+}
+
+// https://www.youtube.com/watch?v=B975bBfHTTg
+// https://www.patreon.com/posts/42255564
+// https://pastebin.com/rQdR1v2d
+function customMaterial( baseColor=0xa0a0a0, useLowPoly=false ){
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        transparent 	: true, 
+        // side         : THREE.DoubleSide,
+        // lights       : true,
+
+        uniforms        : { 
+            // color   : { type :'vec3', value:new THREE.Color( baseColor ) },
+        },
+
+        extensions      : { 
+            derivatives : true
+        },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        void main(){
+            vec4 wPos           = modelMatrix * vec4( position, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;                    // View Space
+            
+            fragUV              = uv;
+            fragWPos            = wPos.xyz;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position = projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+
+        uniform vec3 cameraPosition;
+
+        in  vec3    fragWPos;
+        in  vec3    fragNorm;
+        in  vec2    fragUV;
+        out vec4    outColor;
+
+        // #####################################################################
+
+        float lightSpecularCutoff = 0.4;
+        float viewSpecularCutoff  = 0.98;
+        float specularSmoothness  = 0.03;
+
+        float rimPower            = 1.8;  // Range : 1 > 20
+        float rimCutoff           = 0.5;
+        float rimSmoothness       = 0.05;
+        
+        float glowPower           = 4.0;  // Range : 1 > 20
+        float glowCutoff          = 0.9; 
+        float glowSmoothness      = 0.1;
+
+        float rampCutoff          = 0.1;
+        float rampSmoothness      = 0.05;
+        float rampStrength        = 0.3;
+
+        vec3  tintColor           = vec3( 0.59, 0.84, 0.92 ); // #97D6EB, 151 214 235
+        float tintAlpha           = 0.35;
+
+        // #####################################################################
+
+        void main(){
+            outColor = vec4( 1.0 );
+
+            vec3 lightPos = vec3( 0.5, 0.5, 0.0 );
+            vec3 lightDir = normalize( lightPos );
+            vec3 viewDir  = normalize( cameraPosition - fragWPos );
+            vec3 norm     = normalize( fragNorm );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Directional Light Specular - fresnel facing light
+            float NdLV = dot( norm, lightDir - viewDir );  // 
+            float maskSpecularLit = smoothstep( 
+                lightSpecularCutoff, 
+                lightSpecularCutoff + specularSmoothness, 
+                NdLV
+            );
+
+            // outColor.rgb = vec3( maskSpecularLit );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // View Specular
+            float NdV = dot( norm, viewDir );
+            float maskSpecularView = smoothstep( 
+                viewSpecularCutoff, 
+                viewSpecularCutoff + specularSmoothness, 
+                NdV
+            );
+
+            // outColor.rgb = vec3( maskSpecularView );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Rim
+            // https://docs.unity3d.com/Packages/com.unity.shadergraph@6.9/manual/Fresnel-Effect-Node.html
+            float fresnel = pow( 1.0 - clamp( NdV, 0.0, 1.0 ), rimPower );
+            float maskRim = smoothstep( rimCutoff, rimCutoff + rimSmoothness, fresnel );
+
+            // outColor.rgb = vec3( maskRim );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Inner Glow
+            fresnel        = pow( clamp( NdV, 0.0, 1.0 ), glowPower ); // invert
+            float maskGlow = smoothstep( glowCutoff, glowCutoff + glowSmoothness, fresnel );
+
+            // outColor.rgb = vec3( maskGlow );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Ramp
+            float NdL  = dot( norm, lightDir );
+            float ramp = smoothstep( rampCutoff, rampCutoff + rampSmoothness, NdL ) * rampStrength;
+            outColor.rgb = vec3( ramp );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            outColor.rgb = vec3( 
+                tintColor * ( tintAlpha + ramp ) + 
+                tintColor * ( maskRim + maskGlow + maskSpecularLit ) + 
+                maskSpecularLit + maskSpecularView
+            );
+            
+            outColor.a = tintAlpha + maskRim + maskGlow + maskSpecularLit + maskSpecularView;
+        }`
+    });
+
+    return mat;
+}
+
+
+// Shader "Toon/Lit Glass" {
+//     Properties{
+//         [Header(Main)]
+//         _Color("Main Color", Color) = (1,1,1,0.2)
+//         _SColor("Specular Color", Color) = (1,1,1,1)       
+//         [Header(Light Direction Specular)]
+//         _SpecSize("Light Direction Specular Size", Range(0.65,0.999)) = 0.9 // specular size
+//         _SpecOffset("Light Direction Specular Offset", Range(0.5,1)) = 0.6 // specular offset of the spec Ramp
+//         _Offset2("LightDir Spec Smoothness", Range(0,1)) = 0.05
+//         [Header(View Direction Specular)]
+//         _SpecSize2("View Specular", Range(0.65,0.999)) = 0.9 // specular size
+//         _Offset("View Spec Smoothness", Range(0,1)) = 0.1
+//         [Header(Outer Rim)]
+//         _RimPower2("Rim Offset Out Rim", Range(0,4)) = 0.7
+//         _RimColor2("Outer Rim Color", Color) = (0.49,0.94,0.64,1)
+//         _OutRimCutoff("Out Rim Cutoff Inner", Range(0,1)) = 0
+//         [Header(Inner Fresnel)]
+//         _RimPower("Rim Offset Inner Fresnel", Range(0,4)) = 1.2
+//         _RimColor("Inner Fresnel Rim Color", Color) = (0.49,0.94,0.64,1)       
+//         _FresnelInner("Fresnell Rim Cutoff", Range(0,2)) = 0.7      
+//     }
+ 
+//         SubShader{
+//         Tags{ "Queue" = "Transparent"}
+//         LOD 200
+// 		Blend SrcAlpha OneMinusSrcAlpha 
+ 
+//         CGPROGRAM
+// #pragma surface surf ToonRamp keepalpha
+       
+//     // custom lighting function that uses a texture ramp based
+//     // on angle between light direction and normal
+// #pragma lighting ToonRamp exclude_path:prepass
+//     inline half4 LightingToonRamp(SurfaceOutput s, half3 lightDir, half atten)
+//     {
+// #ifndef USING_DIRECTIONAL_LIGHT
+//         lightDir = normalize(lightDir);
+// #endif
+ 
+//         float d = dot(s.Normal, lightDir);
+//         float dfwidth = fwidth(d);
+//         float ramp = smoothstep(0, dfwidth, d);     
+//         half4 c;
+//         c.rgb = s.Albedo * _LightColor0.rgb * ramp * (atten * 2);
+//         c.a = s.Alpha;
+//         return c;
+//     }
+ 
+   
+//     float4 _Color;
+//     float4 _SColor; // specular color
+//     float _SpecSize, _SpecSize2; // specular size
+//     float _SpecOffset; // offset specular ramp
+//     float _Offset, _Offset2; // specular fade offset
+//     float4 _RimColor, _RimColor2; // fresnel rim color
+//     float _RimPower, _RimPower2; // rim offsets
+//     float _FresnelInner, _OutRimCutoff; // cutoffs
+    
+ 
+//     struct Input {     
+//         float3 viewDir; // view direction from camera
+//     };
+ 
+//     void surf(Input IN, inout SurfaceOutput o) {
+
+//         // lights
+//         float3 lightDirection = normalize(_WorldSpaceLightPos0.xyz);            
+//         half lightDot = dot(o.Normal, lightDirection -IN.viewDir)*0.5 + _SpecOffset; // basing on normal and light direction and view direction
+       
+//         // inner glow and outer rim
+//         float outerrim = _RimPower - saturate(dot(IN.viewDir, o.Normal)); // calculate fresnel rim
+//         float innerglow = _RimPower2 - saturate(dot(IN.viewDir, o.Normal)); // calculate fresnel rim
+//         innerglow =  smoothstep(0.5, 0.5 + _OutRimCutoff, innerglow) * _RimColor2.a;
+//         outerrim = (1-smoothstep(0.5 - _FresnelInner, 0.5, outerrim)) * _RimColor.a;
+      
+//         // make it glow
+//         o.Emission = _RimColor.rgb * pow(outerrim, 1.5); // fresnel rim
+//         o.Emission += _RimColor2.rgb * pow(innerglow, 1.5); // inner glow fresnel
+
+//         // view specular
+//         half viewSpec =  saturate(dot(o.Normal, (IN.viewDir))); // basing on normal and light direction
+        
+//         float viewSpecLine = (smoothstep(_SpecSize2, _SpecSize2 + _Offset, viewSpec)) * 10;
+        
+//         // light dir specular
+// 		float specular= (smoothstep(_SpecSize, _SpecSize + _Offset2, lightDot)) * 10;
+       
+//         o.Emission += saturate(viewSpecLine + specular) * _SColor * 2;
+		
+//         o.Alpha = saturate(_Color.a + (viewSpecLine + specular + outerrim + innerglow));
+//         o.Albedo = saturate(o.Albedo + _Color);
+      
+//     }
+//     ENDCG
+//     }
+//         Fallback "Diffuse"
+// }
+
+</script></body></html>

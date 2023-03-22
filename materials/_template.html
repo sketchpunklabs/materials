@@ -1,21 +1,23 @@
-<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
-import Starter, { THREE }   from '../lib/Starter.js';
+<!DOCTYPE html><html lang="en"><head><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script src="../../import-map.js"></script><script type="module">
+
+import useThreeWebGL2, { useDarkScene } from '../lib/useThreeWebGL2.js';
 import ShapePointsMesh     	from '../lib/meshes/ShapePointsMesh.js';
 import DynLinesMesh        	from '../lib/meshes/DynLineMesh.js';
 import PixelFontMesh       	from '../lib/meshes/PixelFontMesh.js';
 import facedCube           	from '../lib/meshes/FacedCube.js';
 
-let App;
+let App   = useDarkScene( useThreeWebGL2() );
 let Debug = {};
 
-window.addEventListener( "load", _=>{
+window.addEventListener( 'load', async ()=>{
 	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-	App = new Starter( { webgl2:false, grid:true } );
-	App.setCamera( 0, 20, 6, [0,0,0] ).render();
+	App.sphericalLook( 0, 20, 6 );
 
-	App.add( (Debug.pnt = new ShapePointsMesh() ) );
-    App.add( (Debug.ln  = new DynLinesMesh() ) );
-    App.add( (Debug.px  = new PixelFontMesh() ) );
+	App.scene.add( (Debug.pnt = new ShapePointsMesh() ) );
+    App.scene.add( (Debug.ln  = new DynLinesMesh() ) );
+    App.scene.add( (Debug.px  = new PixelFontMesh() ) );
     Debug.px.setRes( 3, 2 );
 
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -35,6 +37,9 @@ window.addEventListener( "load", _=>{
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     const cube = facedCube();
     cube.position.set( 0, 0, -6 );
-    App.add( cube );
+    App.scene.add( cube );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.renderLoop();
 });
 </script></body></html>

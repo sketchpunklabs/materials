@@ -1,0 +1,232 @@
+<!DOCTYPE html><html lang="en"><head><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script src="../../../import-map.js"></script><script type="module">
+
+import useThreeWebGL2, { THREE, useDarkScene } from '../../lib/useThreeWebGL2.js';
+import TexturePass          from '../../lib/misc/TexturePass.js';
+import ShapePointsMesh     	from '../../lib/meshes/ShapePointsMesh.js';
+import DynLinesMesh        	from '../../lib/meshes/DynLineMesh.js';
+
+import GridAlternative      from '../../lib/meshes/GridAlternative.js';
+import ShaderLib            from '../../lib/shaders/ShaderLib.js';
+
+let App   = useDarkScene( useThreeWebGL2() );
+let Debug = {};
+let Ref   = {};
+
+window.addEventListener( 'load', async ()=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	//App.sphericalLook( 19, 40, 8, [2,0,2] );
+    App.sphericalLook( 0, 20, 4 );
+
+	// App.scene.add( (Debug.pnt = new ShapePointsMesh() ) );
+    // App.scene.add( (Debug.ln  = new DynLinesMesh() ) );
+
+    const matHeight = await HeightmapMaterial();
+    const texPass   = new TexturePass( matHeight, 256, 256 );
+    texPass.render( App.renderer );
+
+    const matDisplace = await DisplacementMaterial( texPass.texture );
+    const mesh = GridAlternative.mesh( matDisplace, 2, 2, 120, 120, false, false );
+    mesh.position.y = 0.01;
+    App.scene.add( mesh );
+
+    const quad = new THREE.Mesh( 
+        new THREE.PlaneGeometry( 1, 1 ), 
+        new THREE.MeshBasicMaterial( { map:texPass.texture, side:THREE.DoubleSide } ) 
+    );
+    quad.position.set( 1, 1.5, 0 );
+    App.scene.add( quad );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.renderLoop();
+});
+
+// https://discourse.threejs.org/t/calculating-vertex-normals-after-displacement-in-the-vertex-shader/16989/8
+async function DisplacementMaterial( tex ){
+    return new THREE.RawShaderMaterial({
+    depthTest       : true,
+    transparent 	: false,
+	side			: THREE.DoubleSide,
+    uniforms        : { 
+        heightmap   : { type :'sampler2D', value:tex },
+    },
+    
+    vertexShader    : await ShaderLib.Async(`#version 300 es
+    in vec3 position;
+    in vec3 normal;
+    in vec2 uv;
+    
+    uniform mat4 modelMatrix;
+    uniform mat4 viewMatrix;
+    uniform mat4 projectionMatrix;
+
+    uniform sampler2D heightmap;
+
+    out vec3 fragNorm;
+    out vec3 fragWPos;
+    out vec3 fragLPos;
+    out vec2 fragUV;
+    out float fragN;
+   
+    /////////////////////////////////////////////////////////////////
+
+    // http://lolengine.net/blog/2013/09/21/picking-orthogonal-vector-combing-coconuts
+    vec3 orthogonal(vec3 v) {
+        return normalize(
+            abs(v.x) > abs(v.z) ? 
+                vec3( -v.y,  v.x, 0.0 ) : 
+                vec3(  0.0, -v.z, v.y )
+        );
+    }
+
+    // https://discourse.threejs.org/t/calculating-vertex-normals-after-displacement-in-the-vertex-shader/16989/8
+    vec3 displacementNormal( vec3 dispPos, vec3 pos, vec3 norm, vec2 uv, float hScale, sampler2D map ){
+        // HARD CODED VALUES, Should by dynamic
+        float texelSize = 1.0 / 256.0;
+        float offset    = 0.01;
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Get Neighboring Points using Tangent + Bit Tangent
+        vec3 tangent    = orthogonal( norm );
+        vec3 bitTangent = normalize( cross( norm, tangent ) );
+
+        vec3 pos1       = pos + tangent * offset;
+        vec3 pos2       = pos + bitTangent * offset;
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Grab the Displacement for the neighboring points
+        vec2 uv1        = uv + vec2( -texelSize, 0.0 );
+        vec2 uv2        = uv + vec2( 0.0, -texelSize );
+
+        vec3 dispPos1   = pos1 + norm * ( texture( map, uv1 ).r * hScale );
+        vec3 dispPos2   = pos2 + norm * ( texture( map, uv2 ).r * hScale );
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Compute the final displacement normal
+        vec3 dispTan    = dispPos1 - dispPos;
+        vec3 dispBTan   = dispPos2 - dispPos;
+
+        return normalize( cross( dispTan, dispBTan ) );
+    }
+
+    /////////////////////////////////////////////////////////////////
+
+    void main(){
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // DISPLACEMENT
+        float hScale = 1.5;
+        vec3 pos     = position;
+        vec4 px      = texture( heightmap, uv );
+        pos.y        = px.x * hScale;
+
+        fragNorm     = displacementNormal( pos, position, normal, uv, hScale, heightmap );
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        vec4 wPos   = modelMatrix * vec4( pos, 1.0 );
+        fragWPos    = wPos.xyz;
+        fragLPos    = position;
+        fragUV      = uv;
+        fragN       = px.x;
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        gl_Position = projectionMatrix * viewMatrix * wPos;
+    }`),
+	
+    fragmentShader  : await ShaderLib.Async(`#version 300 es
+    precision mediump float;
+
+    in vec3  fragNorm;
+    in vec3  fragWPos;
+    in vec3  fragLPos;
+    in vec2  fragUV;
+    in float fragN;
+
+    out vec4  outColor;
+
+    ////////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////////
+
+    vec3 lightPos = vec3( 1.0, 5.0, 1.0 );
+
+    void main(){
+        // Base color using noise from vertex shader
+        outColor = vec4( fragN, fragN, fragN, 1.0 );
+
+        // Create normals using derivitive functions. Makes things look low poly
+        // But since I currently can't compute NORMALS from noise displacement
+        // this will have to do for now.
+        // vec3 norm = normalize( cross( dFdx( fragWPos), dFdy( fragWPos ) ) );
+        vec3 norm = normalize( fragNorm );
+
+        // Do some very basic lighting
+        float diffuse = dot( norm, normalize( lightPos - fragWPos ) );
+        outColor.rgb *= clamp( 0.2, 1.0, diffuse );
+    }`)
+
+    });
+}
+
+
+async function HeightmapMaterial( baseColor=0xa0a0a0 ){
+    return new THREE.RawShaderMaterial({
+    // depthTest       : true,
+    // transparent 	: false,
+	// side			: THREE.DoubleSide,
+    uniforms        : { 
+        color   : { type :'vec3', value:new THREE.Color( baseColor ) },
+        color_x : { type :'vec3', value:new THREE.Color( "#878FA3" ) }, // Each axis gets a Grayscaled Value, used as strength of baseColor
+        color_y : { type :'vec3', value:new THREE.Color( "#ffffff" ) }, // these don't really need to be modified unless looking to change 
+        color_z : { type :'vec3', value:new THREE.Color( "#CED4E0" ) }, // the overall strength of each axis
+    },
+    
+    vertexShader    : await ShaderLib.Async(`#version 300 es
+    in vec3 position;
+    in vec2 uv;
+    
+    uniform mat4 modelMatrix;
+    uniform mat4 viewMatrix;
+    uniform mat4 projectionMatrix;
+
+    out vec2 fragUV;
+
+    void main(){
+        vec4 wPos   = modelMatrix * vec4( position, 1.0 );;
+        fragUV      = uv;
+
+        gl_Position = projectionMatrix * viewMatrix * wPos;
+    }`),
+	
+    fragmentShader  : await ShaderLib.Async(`#version 300 es
+    precision mediump float;
+
+    in vec2  fragUV;
+    out vec4  outColor;
+
+    ////////////////////////////////////////////////////////////////////////
+
+    #include Blender.CommonHash
+    #include Blender.Noise
+    #include Blender.FractalNoise
+    #include Blender.NoiseTexture
+    #include Misc.Ramps.floatLinearRamp
+
+    float valRamp[8] = float[]( 0.0, 0.483, 0.5, 0.579, 1.0, 1.0, 1.0, 1.0 );
+    float wgtRamp[8] = float[]( 0.0, 0.433, 0.513, 0.594, 1.0, 1.0, 1.0, 1.0 );
+
+    ////////////////////////////////////////////////////////////////////////
+
+    void main(){
+        // Compute noise & apply a "color ramp" to remap the values around the middle
+        float n     = node_noise_texture_2d_mod( fragUV, 3.0, 4.0, 0.5, 0.0 );
+        n           = floatLinearRamp( valRamp, wgtRamp, n, 5 );
+        // n          *= 1.5;
+
+        outColor = vec4( n, n, n, 1.0 );
+    }`)
+    });
+}
+
+
+</script></body></html>
