@@ -31,6 +31,8 @@ https://thebookofshaders.com/13/
 
 https://joyrok.com/SDFs-Part-Two
 
+PSRD Noise
+https://github.com/stegu/psrdnoise
 
 const float PI = 3.141592653;
 vec2 map_from_sphere(vec3 p){
