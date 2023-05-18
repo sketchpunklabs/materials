@@ -1,0 +1,6 @@
+https://docs.unity3d.com/Packages/com.unity.shadergraph@14.0/manual/Normal-From-Height-Node.html
+code to compute normal maps from height maps from unity
+
+
+https://github.com/Fubaxiusz/fubax-shaders/blob/master/Shaders/TiltShift.fx#L100
+Tilt Shift

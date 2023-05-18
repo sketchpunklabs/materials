@@ -1,0 +1,276 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../../lib/Starter.js';
+import Suzanne              from '../lib/Suzanne.js';
+import Cube                 from '../../lib/meshes/Cube.js';
+import Sphere               from '../../lib/meshes/Sphere.js';
+
+let App;
+let Debug = {};
+let Ref   = {};
+
+window.addEventListener( "load", async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App = new Starter( { webgl2:false, grid:true, lights:true } );
+    App.setCamera( 20, 20, 4, [0, 0.5, 0] );
+    App.onRender = onRender;
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const mat  = customMaterial();
+    App.add( Cube.floor( { mat, pos:[2,0,0], scl:1 } ) );
+    App.add( Sphere( { mat, pos:[-2,0.5,0], radius:0.5, scl:1 } ) );
+    App.add( await Suzanne( mat ) );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.render();
+});
+
+function onRender( dt, et ){
+}
+
+// https://www.techarthub.com/unity-grid-shader/
+function customMaterial( tex01 ){
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        // transparent 	: true, 
+        // side         : THREE.DoubleSide,
+        // lights       : true,
+
+        uniforms        : { 
+            gridSize    : { type: 'float', value: 0.2 },
+            lineColor   : { type: 'vec3',  value: new THREE.Color( 0x00ff00 ) },
+            cellColor   : { type: 'vec3',  value: new THREE.Color( 0x303030 ) }
+        },
+
+        extensions      : { 
+            derivatives : true
+        },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        void main(){
+            vec4 wPos           = modelMatrix * vec4( position, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;                    // View Space
+            
+            fragUV              = uv;
+            fragWPos            = wPos.xyz;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+            
+            // https://gist.github.com/mattatz/86fff4b32d198d0928d0fa4ff32cf6fa
+            // Decompose Scale
+            // mat4 mtx  = modelMatrix;
+            // fragScale = vec3(
+            //     length( vec3( mtx[0][0], mtx[0][1], mtx[0][2] ) ),
+            //     length( vec3( mtx[1][0], mtx[1][1], mtx[1][2] ) ),
+            //     length( vec3( mtx[2][0], mtx[2][1], mtx[2][2] ) )
+            // );
+
+            gl_Position = projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+        
+        uniform float gridSize;
+        uniform vec3  lineColor;
+        uniform vec3  cellColor;
+        //uniform vec3  cameraPosition;
+
+        in  vec3    fragWPos;
+        in  vec3    fragNorm;
+        in  vec2    fragUV;
+        out vec4    outColor;
+
+        // #####################################################################
+
+        float triplanarGrid( float size, vec3 wPos ){
+            vec3 coord = wPos / size; // * fragScale;
+
+            // https://madebyevan.com/shaders/grid/
+            vec3 grid  = abs( fract( coord - 0.5 ) - 0.5 ) / fwidth( coord );
+            float line = min( min( grid.x, grid.y ), grid.z );
+
+            return 1.0 - min( line, 1.0 );
+        }
+
+        // float checkerboard(vec2 coord, float size){
+        //     vec2 pos = floor(coord/size); 
+        //     return mod(pos.x+pos.y,2.0);
+        // }
+        
+
+        // #####################################################################
+        void main(){
+            outColor = vec4( 1.0 );
+
+            vec3 norm = normalize( fragNorm );
+            
+            float blendOffset = 0.5; // Offsets to tighten up the blending 0 to 0.5
+            float blendExp    = 8.0;   // 1 to 8, Removes more of the blur to really tighten up the blending
+            
+            vec3 bNorm = abs( norm );
+            bNorm      = clamp( bNorm - blendOffset, 0.0, 1.0 );  // Offsets to tighten up the blending 0 to 0.5
+            bNorm      = pow( bNorm, vec3( blendExp ) );          // 1 to 8, Removes more of the blur to really tighten up the blending
+            bNorm      = bNorm / ( bNorm.x + bNorm.y + bNorm.z );
+
+
+            /* Trying to anti-alias */
+            float cellSize = 0.2;
+            float lnSize = 0.05;
+
+            vec3 coord  = fragWPos / cellSize;
+            vec3 grid    = abs( fract( coord - 0.5 ) - 0.5 ) / fwidth( coord );
+
+            outColor.rgb = vec3( min( min( grid.x, grid.y ), grid.z ) );
+
+
+            vec3 maxPos  = ( fragWPos / cellSize ) - 0.5;	// Move to the Center of Gradient
+            vec3 fmaxPos = fract( maxPos );		// Normalize-ish, get 0 -> 1
+            vec3 maxPX   = fwidth( maxPos );	// Pixel Width of POS
+
+            // Smooth step only the thickness to thickness + px;
+            // MID - SIZE to MID - SIZE - PX ) -  ( MID + SIZE to MID + SIZE + PX )
+            vec3 grid2 = 
+                smoothstep( 0.5 - lnSize - maxPX,	vec3(0.5) - lnSize, fmaxPos ) - 
+                smoothstep( vec3(0.5) + lnSize,	0.5 + lnSize + maxPX,	fmaxPos );
+
+
+            float  mask     = max( max( grid2.x, grid2.z ), grid2.y );
+            outColor.rgb = vec3( mask );
+            
+            // outColor.rgb = vec3( dot( grid2, vec3( 1.0 ) ) );
+
+
+            // vec3 test = abs( fract( coord - 0.5 ) - 0.5 ) ;
+
+            // outColor.rgb = vec3( min( min( test.x, test.y ), test.z ) );
+            // // outColor.rgb = vec3(  test.z );
+
+
+            outColor.rgb = vec3( max( grid2.x, grid2.y ) );
+            outColor.rgb = vec3( max( grid2.y, grid2.z ) );
+            // outColor.rgb = vec3( max( grid2.z, grid2.x ) );
+
+            // outColor.rgb = vec3( max( grid.x, grid.y ) ) * bNorm.z +
+            //                vec3( max( grid.y, grid.z ) ) * bNorm.x + 
+            //                vec3( max( grid.z, grid.x ) ) * bNorm.y;
+
+            // outColor.rgb = vec3( max( grid.x, grid.y ) ) * abs(norm.z) +
+            //                vec3( max( grid.y, grid.z ) ) * abs(norm.x) + 
+            //                vec3( max( grid.z, grid.x ) ) * abs(norm.y);
+
+            
+            // Mask each axis
+            vec3 xzMask = vec3( grid2.x, 0.0, grid2.z );
+            vec3 yzMask = vec3( 0.0, grid2.y, grid2.z );
+            vec3 xyMask = vec3( grid2.x, grid2.y, 0.0 );
+            vec3 maskx = mix(
+                mix( xzMask, yzMask, abs( norm.x ) ),
+                xyMask, abs( norm.z )
+            );
+
+            outColor.rgb = vec3( maskx );
+            // outColor.rgb = vec3( max( max( maskx.x, maskx.y ), maskx.z ) );
+            // outColor.rgb = vec3( 1.0 - step( dot( maskx, vec3( 1.0 ) ), 0.0 ) );
+            
+
+           /* WORKS WELL BUT NOT ANTI ALIAS
+            float cellSize = 0.2;
+            float lineSize = 0.07;
+
+            vec3 coord    = fragWPos / cellSize;
+            vec3 fCoord   = fwidth( coord );
+
+            vec3 gradCell = fract( coord );
+            vec3 lnCell   = step( gradCell, vec3( lineSize ) );
+
+            // Mask each axis
+            vec3 xzMask = vec3( lnCell.x, 0.0, lnCell.z );
+            vec3 yzMask = vec3( 0.0, lnCell.y, lnCell.z );
+            vec3 xyMask = vec3( lnCell.x, lnCell.y, 0.0 );
+            vec3 mask = mix(
+                mix( xzMask, yzMask, abs( norm.r ) ),
+                xyMask, abs( norm.z )
+            );
+
+            float gridMask = 1.0 - step( dot( mask, vec3( 1.0 ) ), 0.0 );
+
+            // outColor.rgb = vec3( lnCell.x );
+            // outColor.rgb = vec3( lnCell );
+            outColor.rgb = vec3( gridMask );
+            */
+             
+
+            /*
+            vec3 norm = normalize( fragNorm );
+            vec3 mpos = mod( fragWPos, 0.2 );
+            // mpos = mpos * mpos;
+
+            vec3 spos   = step( mpos, vec3( 0.01 ) );
+            
+            // Mix the Axis 
+            vec3 xzMask = vec3( spos.x, 0.0, spos.z );
+            vec3 yzMask = vec3( 0.0, spos.y, spos.z );
+            vec3 xyMask = vec3( spos.x, spos.y, 0.0 );
+
+            vec3 mask = mix(
+                mix( xzMask, yzMask, abs( norm.r ) ),
+                xyMask, abs( norm.z )
+            );
+
+            float dot = dot( mask, vec3( 1.0 ) );
+            // dot = max( max( mask.x, mask.y ), mask.z );
+            // dot = step( 0.00001, dot );
+
+            float x = mix( 0.0-dot, dot+1.0, abs( norm.z ) );
+            float y = mix( 0.0-dot, dot+1.0, abs( norm.y ) );
+            x = clamp( x, 0.0, 1.0 );
+            y = clamp( y, 0.0, 1.0 );
+
+
+            float size = 0.2;
+            vec3 npos = -fragWPos;
+            vec3 bpos = clamp( fragWPos * 100.0, 0.0, 1.0 );
+            vec3 ma = ( mod( npos, size ) - (size / 2.0) ) * -1.0;
+            vec3 mb = ( mod( fragWPos, size ) - (size / 2.0) );
+
+            vec3 mlerp = mix( ma, mb, bpos );
+
+            float xx = step( mlerp.z * mlerp.y, 0.0 ); // Check box on X
+            float zz = step( mlerp.x * mlerp.y, 0.0 ); // Check box on Z
+            float yy = step( mlerp.z * mlerp.x, 0.0 ); // Check box on Y
+
+            float cc = mix( mix( xx, zz, x ), yy, y );
+
+            float contrast = 0.5;
+            cc = mix( 1.0, cc, contrast );
+
+            vec3 color = mix( vec3(1.0,1.0,0.0), vec3(0.0,1.0,1.0), y );
+            color = color * cc;
+
+            outColor     = vec4( 1.0 );
+            // outColor.rgb = vec3( spos.x );
+            outColor.rgb = vec3( mask );
+            // outColor.rgb = vec3( dot );
+            // outColor.rgb = vec3( y );
+            // outColor.rgb = mask;
+
+            // outColor.rgb = vec3( color );
+            */
+        }`
+    });
+
+    return mat;
+}
+
+</script></body></html>
