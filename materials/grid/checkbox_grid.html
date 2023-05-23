@@ -34,16 +34,6 @@ function onPreRender( dt, et ){
     Ref.mesh.material.offsetX = step;
 }
 
-function rgba( c, a=1.0 ){
-    const NORMALIZE_RGB	= 1 / 255.0;
-    return [
-        ( c >> 16 & 255 ) * NORMALIZE_RGB,
-        ( c >> 8 & 255 )  * NORMALIZE_RGB,
-        ( c & 255 )       * NORMALIZE_RGB,
-        a
-    ];
-}
-
 function customMaterial(){
     const mat = new THREE.RawShaderMaterial({
         name            : 'CheckboxGrid',
@@ -155,17 +145,6 @@ function customMaterial(){
     });
 
     return mat;
-}
-
-function updateParameters( uniforms, props ){
-    uniforms.minGrid.value     = props.minGrid;
-    uniforms.maxGrid.value     = props.maxGrid;
-    uniforms.maxThick.value    = props.maxThick;
-    uniforms.planeScale.value  = props.planeScale;
-
-    uniforms.baseColor.value   = rgba( props.baseColor, props.baseColorA );
-    uniforms.minColor.value    = rgba( props.minColor,  props.minColorA );
-    uniforms.maxColor.value    = rgba( props.maxColor,  props.maxColorA );
 }
 
 </script></body></html>
