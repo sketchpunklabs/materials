@@ -1,0 +1,152 @@
+<!DOCTYPE html><html lang="en"><head><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script src="../../import-map.js"></script><script type="module">
+
+// #region IMPORTS
+import useThreeWebGL2, { useDarkScene, THREE } from '../../lib/useThreeWebGL2.js';
+import facedCube 			from '../../lib/meshes/FacedCube.js';
+import { vec3 }             from 'gl-matrix';
+// #endregion
+
+// #region MAIN
+let App   = useDarkScene( useThreeWebGL2(), {grid:false} );
+let Debug = {};
+let Ref   = {};
+
+window.addEventListener( 'load', async _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.sphericalLook( 0, 20, 12 );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.scene.add( facedCube() );
+
+    Ref.grid = new Grid( { size:100, segments: 100 } );
+    App.scene.add( Ref.grid );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.renderLoop();
+});
+// #endregion
+
+class Grid extends THREE.LineSegments{
+
+    constructor( props={} ){
+        props = Object.assign( {
+            mainColor   : 0x4E4E4E,
+            subColor    : 0x404040,
+            size        : 10,
+            segments    : 10,
+            sub         : 5,
+        }, props );
+
+        super( 
+            Grid.buildGeo( props.size, props.segments, props.sub ), 
+            GridMaterial( props )
+        );
+
+        this.frustumCulled = false;
+        this.renderOrder   = -900;
+    }
+
+    static buildGeo( size=10, seg=10, sub=5 ){
+        const h     = size / 2;
+        const sCnt  = seg * sub;
+        const hCnt  = sCnt * 0.5;
+        const inc   = size / sCnt;
+        const verts = [];
+        
+        let ii;
+        let grp;
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Grid Lines
+        for( let i=0; i <= hCnt; i++ ){
+            ii  = inc * i;
+            grp = ( i % sub )? 1 : 0;
+            verts.push(
+                ii, 0,  -h, grp,  ii, 0,   h, grp,  // Positive Vertical Lines
+               -ii, 0,  -h, grp, -ii, 0,   h, grp,  // Negative Vertical Lines
+                -h, 0,  ii, grp,   h, 0,  ii, grp,  // Positive Horizontal Lines
+                -h, 0, -ii, grp,   h, 0, -ii, grp,  // Negative Horizontal Lines
+            );
+        }
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute( 'position', new THREE.BufferAttribute( new Float32Array(verts), 4 ) );
+
+        return geo;
+    }
+}
+
+function toRgbBuf( ary, i, c ){
+    const NORMALIZE_RGB	= 1 / 255.0;
+    ary[ i+0 ] = ( c >> 16 & 255 ) * NORMALIZE_RGB;
+    ary[ i+1 ] = ( c >> 8 & 255 )  * NORMALIZE_RGB;
+    ary[ i+2 ] = ( c & 255 )       * NORMALIZE_RGB;
+}
+
+function GridMaterial( props={} ){
+    props = Object.assign( {
+        mainColor   : 0x4E4E4E,
+        subColor    : 0x404040,
+    }, props );
+
+    const aryColor = new Float32Array( 2 * 3 );
+
+    toRgbBuf( aryColor, 0, props.mainColor );
+    toRgbBuf( aryColor, 3, props.subColor );
+
+    const mat = new THREE.RawShaderMaterial({
+        name            : 'InfiniteLineGrid',
+        depthTest       : true,
+        transparent     : true,
+        alphaToCoverage : false,
+        side            : THREE.DoubleSide,
+
+        uniforms: {
+            colors      : { value: aryColor },
+        },
+
+        extensions: { derivatives: true, },
+
+        vertexShader: `#version 300 es
+        in vec4 position;
+
+        uniform vec3 cameraPosition;
+
+        uniform mat4 modelMatrix;
+        uniform mat4 viewMatrix;
+        uniform mat4 projectionMatrix;
+
+        flat out int iColor;
+
+        void main(){
+            // Move grid to always be under the camera
+            vec3 pos      = position.xyz;
+            pos.xz       += cameraPosition.xz - fract( cameraPosition.xz / 1.0 );
+
+            vec4 wPos     = modelMatrix * vec4( pos, 1.0 );  // World Space
+            vec4 vPos     = viewMatrix * wPos;               // View Space
+            gl_Position   = projectionMatrix * vPos;
+            
+            iColor        = int( position.w );
+        }`,
+
+        fragmentShader: `#version 300 es
+        precision mediump float;
+
+        uniform vec3 colors[2];
+
+        flat in int iColor;
+        out vec4 outColor;
+
+        void main(){
+            outColor = vec4( colors[ iColor ], 1.0 );
+        }`,
+    });
+
+    return mat;
+}
+
+</script></body></html>
