@@ -1,0 +1,171 @@
+<!DOCTYPE html><html lang="en"><head><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script src="../../import-map.js"></script><script type="module">
+import useThreeWebGL2, { useDarkScene, THREE } from '../../lib/useThreeWebGL2.js';
+
+let App   = useDarkScene( useThreeWebGL2(), { grid:false } );
+let Debug = {};
+let Ref   = {};
+
+window.addEventListener( "load", async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.sphericalLook( 0, 20, 6 );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const geo  = new THREE.PlaneGeometry( 2, 2, 1, 1 );
+    geo.rotateX( -Math.PI * 0.5 );
+    const mesh = new THREE.Mesh( geo, customMaterial() );
+
+    mesh.scale.setScalar( 3 );
+    // mesh.frustumCulled = false;
+    // mesh.renderOrder   = -900;
+    // mesh.position.y = -1.5;
+    // mesh.rotation.z = -90 * Math.PI / 180;
+    App.scene.add( mesh );
+
+    Ref.mesh = mesh;
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.createRenderLoop( onPreRender ).start();
+});
+
+function onPreRender( dt, et ){
+    const step = -( et / 0.9 ) % 6.0;
+    Ref.mesh.material.offsetX = step;
+}
+
+function rgba( c, a=1.0 ){
+    const NORMALIZE_RGB	= 1 / 255.0;
+    return [
+        ( c >> 16 & 255 ) * NORMALIZE_RGB,
+        ( c >> 8 & 255 )  * NORMALIZE_RGB,
+        ( c & 255 )       * NORMALIZE_RGB,
+        a
+    ];
+}
+
+function customMaterial(){
+    const mat = new THREE.RawShaderMaterial({
+        name            : 'CheckboxGrid',
+        side            : THREE.DoubleSide,
+        depthTest       : true,
+        transparent 	: true,
+        alphaToCoverage : true,
+        extensions      : { derivatives : true },
+
+        uniforms        : {
+            offset  : { type: 'vec4',  value: [0,0] },
+        },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+
+        uniform mat4  modelMatrix;
+        uniform mat4  viewMatrix;
+        uniform mat4  projectionMatrix;
+
+        out vec3  fragWPos;
+        out vec2  fragUV;
+        
+        // ############################################################
+
+        void main(){
+            vec4 wPos       = modelMatrix * vec4( position, 1.0 );
+            gl_Position     = projectionMatrix * viewMatrix * wPos;
+            fragWPos        = wPos.xyz;
+            fragUV          = uv;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+            
+        uniform vec2 offset;    
+        in vec3 fragWPos;
+        in vec2 fragUV;
+        
+        out vec4 outColor;
+
+        // #####################################################################
+
+        float sdfCross( vec2 p, vec2 b, float r ){
+            p = abs( p ); 
+            p = ( p.y > p.x )? p.yx : p.xy;
+            
+            vec2  q = p - b;
+            float k = max( q.y, q.x );
+            vec2  w = ( k > 0.0 )? q : vec2( b.y - p.x, -k );
+            float d = length( max( w, 0.0 ) );
+            return ( ( k >0.0 )? d : -d ) + r;
+        }
+
+        vec3 hsl2rgb( vec3 c ){ // Hue: 0-1, Sat-01, Lit : 0,5
+            vec3 rgb = clamp( 
+                abs(
+                    mod( c.x * 6.0 + vec3( 0.0, 4.0, 2.0 ), 6.0 ) - 3.0
+                ) - 1.0, 0.0, 1.0
+            );
+
+            return c.z + c.y * ( rgb - 0.5 ) * ( 1.0 - abs( 2.0 * c.z -1.0 ) );
+        }
+
+        vec3 rgb( int c ){
+            return vec3(
+                float( ( c >> 16 ) & 0xff ) * 0.00392156863,
+                float( ( c >> 8 ) & 0xff ) * 0.00392156863,
+                float( c & 0xff ) * 0.00392156863
+            );
+        }
+
+        // #####################################################################
+        void main(){
+            outColor   = vec4( 1.0 );
+            vec2 pos   = fragWPos.xz + offset;
+            vec2 space = pos / 1.0;
+            vec2 coord = floor( space );
+            vec2 grad  = fract( space );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Checker box
+            float mask   = mod( coord.x + mod( coord.y, 2.0 ), 2.0 );
+            outColor.rgb = mix( rgb( 0x404040 ), rgb( 0x969696 ), mask );
+            
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Crosses
+            mask    = sdfCross( grad - 0.5, vec2(0.1, 0.02), 0.0 );
+            mask    = 1.0 - step( 0.0, mask );
+
+            float hue = length( coord ) / 2.8;    // Cycle some colors
+            outColor.rgb = mix( outColor.rgb, hsl2rgb( vec3( hue, 1.0, 0.6) ), mask );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Outer boarder
+            vec2 vMask    = step( 0.5-0.01, abs( fragUV - 0.5 ) );
+            outColor.rgb *= 1.0 - max( vMask.x, vMask.y );
+        }`
+    });
+
+    Object.defineProperty(mat, 'offsetX', {
+        set(v){ mat.uniforms.offset.value[ 0 ] = v; },
+    });
+
+    Object.defineProperty(mat, 'offsetY', {
+        set(v){ mat.uniforms.offset.value[ 1 ] = v; },
+    });
+
+    return mat;
+}
+
+function updateParameters( uniforms, props ){
+    uniforms.minGrid.value     = props.minGrid;
+    uniforms.maxGrid.value     = props.maxGrid;
+    uniforms.maxThick.value    = props.maxThick;
+    uniforms.planeScale.value  = props.planeScale;
+
+    uniforms.baseColor.value   = rgba( props.baseColor, props.baseColorA );
+    uniforms.minColor.value    = rgba( props.minColor,  props.minColorA );
+    uniforms.maxColor.value    = rgba( props.maxColor,  props.maxColorA );
+}
+
+</script></body></html>
