@@ -110,12 +110,7 @@ function customMaterial(){
 
             float mask = 1.0 - gridTextureGradBox( uv, dx, dy, 20.0 );
 
-            vec3 c     = color * mask;
-            
-            // gamma correction
-            // c = pow( c, vec3( 0.4545 ) ); // Doesn't help, just makes it brighter
-
-            outColor.rgb = c;
+            outColor.rgb = color;
             outColor.a   = mask;
         }`
     });
