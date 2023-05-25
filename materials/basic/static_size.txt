@@ -1,0 +1,12 @@
+        vec3 pos    = position * ( length( cameraPosition - modelMatrix[3].xyz ) * 0.05 );
+        vec4 wPos   = modelViewMatrix * vec4( pos, 1.0 );
+
+        // float fov  = 3.1415927 / 4.0;  // 45 degrees FOV
+        // float dist = distance( cameraPosition, modelMatrix[3].xyz );
+        // float size = ( 2.0 * tan( fov / 2.0 ) ) * dist;
+        // vec3 pos   = position * ( size / 20.0 );
+        // vec4 wPos  = modelViewMatrix * vec4( pos, 1.0 );
+
+        // vec4 wPos  = viewMatrix * vec4( modelMatrix[3].xyz, 1.0 );
+        // wPos.xyz  /= wPos.w;
+        // wPos       = modelViewMatrix * vec4( position * ( 0.04 * -wPos.z ), 1.0 );

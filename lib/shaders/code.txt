@@ -1,0 +1,27 @@
+// ##############################################################
+// Create a Ray
+
+// Get the fragment's position in screen space
+vec2 screenPos = gl_FragCoord.xy;
+
+// Convert the screen space position to normalized device coordinates (NDC)
+vec2 ndcPos = (screenPos / u_ViewportSize) * 2.0 - 1.0;
+
+// Create a 4D clip space position
+vec4 clipPos = vec4(ndcPos, -1.0, 1.0);
+
+// Combine the projection matrix and view matrix
+mat4 projViewMatrix = u_ProjectionMatrix * u_ViewMatrix;
+
+// Invert the combined matrix
+mat4 inverseProjViewMatrix = inverse(projViewMatrix);
+
+// Transform the clip space position to world space
+vec4 worldPos = inverseProjViewMatrix * clipPos;
+worldPos /= worldPos.w;
+
+// Calculate the ray direction by subtracting the camera position from the world position
+vec3 rayDirection = worldPos.xyz - cameraPosition;  // Replace 'cameraPosition' with your camera's position
+
+// Normalize the ray direction
+rayDirection = normalize(rayDirection);
