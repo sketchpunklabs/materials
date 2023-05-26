@@ -12,11 +12,26 @@ let Ref   = {};
 
 window.addEventListener( 'load', async _=>{
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    App.sphericalLook( 0, 20, 6 );
+    App.sphericalLook( 0, 30, 6, [0,0.5,0] );
 
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     const geo  = new THREE.BoxGeometry( 1, 1, 1 ); 
-    const mesh = new THREE.Mesh( geo, customMaterial() ); // new THREE.MeshPhongMaterial()
+    let mesh   = new THREE.Mesh( geo, customMaterial() );
+    // mesh.scale.set( 2, 1.5, 0.5 );
+    mesh.position.y = 0.6;
+    App.scene.add( mesh );
+
+
+    mesh = new THREE.Mesh( geo, customMaterial() );
+    mesh.scale.set( 2, 1.5, 0.5 );
+    mesh.position.set( -2, 0.8, 0 );
+    mesh.material.pattern = 1;
+    App.scene.add( mesh );
+
+    mesh = new THREE.Mesh( geo, customMaterial() );
+    mesh.scale.set( 1.5, 1.0, 1.5 );
+    mesh.position.set( 2, 0.6, 0 );
+    mesh.material.pattern = 2;
     App.scene.add( mesh );
 
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -34,7 +49,8 @@ function customMaterial( faceColor=0xe0e0e0, borderColor=null ){
         extensions      : { derivatives : true },
 
         uniforms        : {
-            borderSize  : { type: 'float', value: 0.01 },
+            pattern     : { type: 'int',   value: 0 },
+            borderSize  : { type: 'float', value: 0.02 },
             borderAlpha : { type: 'float', value: 1.0 },
             borderColor : {
                 type   : 'vec3',
@@ -87,7 +103,8 @@ function customMaterial( faceColor=0xe0e0e0, borderColor=null ){
 
         fragmentShader  : `#version 300 es
         precision mediump float;
-                
+
+        uniform int   pattern;
         uniform float borderSize;
         uniform vec3  borderColor;
         uniform float borderAlpha;
@@ -96,7 +113,7 @@ function customMaterial( faceColor=0xe0e0e0, borderColor=null ){
 
         flat in vec3 fragMaxLPos;
         flat in vec3 fragLNorm;
-            in vec3 fragScaleLPos;
+             in vec3 fragScaleLPos;
 
         out vec4 outColor;
 
@@ -114,6 +131,55 @@ function customMaterial( faceColor=0xe0e0e0, borderColor=null ){
             vec3 vMask = fragLNorm + smoothstep( fragMaxLPos - borderSize, fragMaxLPos - borderSize - px, absPos );
             float mask = 1.0 - min( min( vMask.x, vMask.y ), vMask.z );
 
+            // outColor   = mix( vec4( faceColor, faceAlpha ), vec4( borderColor, borderAlpha ), mask );
+            // outColor.a = 1.0;
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Square Corners
+            if( pattern == 2 ){
+                float csize         = 0.15;
+                vec3 corners        = fragLNorm + smoothstep( fragMaxLPos-csize-px, fragMaxLPos-csize, absPos );
+                float cornerMask    = min( min( corners.x, corners.y ), corners.z );
+
+                mask *= cornerMask;
+                
+                // outColor.rgb = vec3( cornerMask*mask ); // Cool edge markers
+                // outColor.rgb = vec3( cornerMask+mask );
+                // outColor     = mix( vec4( faceColor, faceAlpha ), vec4( borderColor, borderAlpha ), cornerMask );
+                // outColor     = mix( vec4( faceColor, faceAlpha ), vec4( borderColor, borderAlpha ), cornerMask*mask );
+                // outColor     = mix( vec4( faceColor, faceAlpha ), vec4( borderColor, borderAlpha ), cornerMask+mask );
+                // outColor     = mix( vec4( faceColor, faceAlpha ), vec4( borderColor, borderAlpha ), ( 1.0 - cornerMask ) * mask );
+            }
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Circle Corners
+            // float ccLen  = length( absPos - fragMaxLPos );
+            // float ccMask = step( ccLen, 0.15 );
+
+            // outColor.rgb = vec3( ccMask );
+            // outColor     = mix( vec4( faceColor, faceAlpha ), vec4( borderColor, borderAlpha ), ccMask );
+            // outColor     = mix( vec4( faceColor, faceAlpha ), vec4( borderColor, borderAlpha ), ccMask + mask );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Grid mask to cut into Edge Mask to create dash pattern
+            if( pattern == 1 ){
+                float cellSize  = 0.3;
+                float dashRatio = 0.2;
+                vec3 cMask      = 1.0 - step( fragMaxLPos-0.1, absPos );    // Mask to make corner areas
+                vec3 grid       = ( absPos ) / cellSize;                    // Create cell gradients
+                vec3 gGrad      = abs( fract( grid ) - 0.5 );               // Shift gradient to 0 > 0.5 > 0
+                vec3 mStrip     = step( dashRatio, gGrad );                 // Sharpen gradient to make stripes
+                mStrip          = 1.0 - mStrip * cMask;                     // Cut corners from strip & invert
+                float gMask     = min( min( mStrip.x, mStrip.y ), mStrip.z );
+
+                mask *= gMask;
+            }
+            // outColor.rgb    = vec3( gMask * mask );
+            // outColor        = mix( vec4( faceColor, faceAlpha ), vec4( borderColor, borderAlpha ), gMask * mask  );
+
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Final Output
             outColor   = mix( vec4( faceColor, faceAlpha ), vec4( borderColor, borderAlpha ), mask );
         }`
     });
@@ -127,6 +193,10 @@ function customMaterial( faceColor=0xe0e0e0, borderColor=null ){
 
     Object.defineProperty( mat, 'borderSize', {
         set( v ){ mat.uniforms.borderSize.value = v; },
+    });
+
+    Object.defineProperty( mat, 'pattern', {
+        set( v ){ mat.uniforms.pattern.value = v; },
     });
 
     return mat;
