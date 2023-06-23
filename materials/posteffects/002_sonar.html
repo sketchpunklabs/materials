@@ -1,0 +1,123 @@
+<!DOCTYPE html><html lang="en"><head><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script src="../../import-map.js"></script><script type="module">
+// #region IMPORTS
+import useThreeWebGL2, { useDarkScene, THREE } from '../../lib/useThreeWebGL2.js';
+import usePostRender from '../../lib/usePostRender.js';
+import FacedCube     from '../../lib/meshes/FacedCube.js';
+import Plane         from '../../lib/meshes/Plane.js';
+// #endregion
+
+// #region MAIN
+let App   = useDarkScene( useThreeWebGL2() );
+let Post  = usePostRender( App );
+let Debug = {};
+let Ref   = {};
+
+window.addEventListener( 'load', async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.sphericalLook( 0, 30, 8, [0,0,0] );
+    Ref.mat = customMaterial( Post.colorTexture, Post.depthTexture );
+    Post.postMaterial = Ref.mat;
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.scene.add( FacedCube( [0,0.5,0]) );
+    App.scene.add( Plane( { 
+        w:4, h:4, ground:true, 
+        pos:[0,0.01,0], 
+        mat: new THREE.MeshBasicMaterial( { color:0x808080 } )
+    } ) );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Post.renderLoop();
+    Post.createRenderLoop( null, onPostRender ).start();
+});
+
+function onPostRender( dt, et ){
+    Ref.mat.et = et;
+}
+
+// #endregion
+
+function customMaterial( tex, depth ){
+    const mat = new THREE.RawShaderMaterial({
+        name            : 'PostMaterial',
+        depthTest       : true,
+        transparent 	: false,
+        alphaToCoverage : false,
+        uniforms        : { 
+            texColor : { type:'sampler2D', value: tex },
+            texDepth : { type:'sampler2D', value: depth },
+            et       : { type:'float', value: 0 },
+        },
+    
+        vertexShader    : `#version 300 es
+        in vec2 position;
+		in vec2 uv;
+
+        out vec2 fragUV;
+
+        void main(){            
+            fragUV      = uv;
+            gl_Position = vec4( position, 0.0, 1.0 );
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+        
+        uniform mediump mat4 viewMatrix;
+        uniform mediump mat4 projectionMatrix;
+        
+        uniform sampler2D texColor;
+        uniform sampler2D texDepth;
+        uniform float     et;
+        
+        in  vec2 fragUV;
+        out vec4 outColor;
+
+        // #####################################################
+
+        // https://stackoverflow.com/questions/32227283/getting-world-position-from-depth-buffer-value
+        // this is supposed to get the world position from the depth buffer
+        vec3 worldPosFromDepth( vec2 texCoord, float depth) {
+            vec4 clipPos = vec4( texCoord * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0 );
+            vec4 viewPos = inverse( projectionMatrix ) * clipPos;
+            
+            // Perspective division
+            // viewPos /= viewPos.w;
+            
+            vec4 worldPos = inverse( viewMatrix ) * viewPos;
+            return worldPos.xyz / worldPos.w;
+        }
+
+        // #####################################################
+
+        void main(){
+            vec4 color  = texture( texColor, fragUV );
+            outColor    = color;
+
+            float depth = texture( texDepth, fragUV ).x;
+            vec3 wPos   = worldPosFromDepth( fragUV, depth );
+
+            float t      = fract( ( et ) / 2.0 );
+            float radius = mix( 0.1, 4.0, t );
+            float space  = mix( 0.1, 1.5, t );
+            float alpha  = 1.0 - t;
+
+            float dist = length( wPos );
+            if( dist < radius ){
+                outColor.rgb = mix( 
+                    outColor.rgb, 
+                    vec3(1.0), 
+                    smoothstep( radius-space, radius, dist ) * alpha
+                );
+            }
+        }`,
+    });
+
+    Object.defineProperty( mat, 'et', { set( v ){ mat.uniforms.et.value = v; } });
+
+    return mat;
+}
+
+</script></body></html>
