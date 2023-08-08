@@ -1,0 +1,193 @@
+<!DOCTYPE html><html lang="en"><head><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script src="../../../import-map.js"></script><script type="module">
+import useThreeWebGL2, { useDarkScene, THREE } from '../../lib/useThreeWebGL2.js';
+
+
+let App   = useDarkScene( useThreeWebGL2() );
+let Ref   = {};
+
+window.addEventListener( 'load', async _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.sphericalLook( 0, 20, 3, [0,0.5,0]);
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const mat  = customMaterial();
+    Ref.mat    = mat;
+    
+    const geo  = new THREE.PlaneGeometry( 1, 1 );
+    const mesh = new THREE.Mesh( geo, mat );
+    mesh.position.y = 0.5;
+    App.scene.add( mesh );
+    
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.renderLoop();
+    setupUI();
+});
+
+function elm( id ){ return document.getElementById( id ) }
+function onIn( el, fn ){ el.addEventListener( 'input', fn ); }
+function setupUI(){
+    onIn( elm( 'inStamina' ), e=>{ Ref.mat.value = parseFloat( e.target.value ); } );
+}
+
+function customMaterial( props ){
+    // #region PROPS
+    // props = Object.assign( {
+        // baseColor : 0x00ffff,
+        // tex       : null,
+    // }, props );
+    // #endregion
+
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        side            : THREE.DoubleSide,
+        transparent     : true, 
+        // forceSinglePass : true,             
+        // alphaToCoverage : true,             
+        // lights          : true,
+
+        uniforms        : {
+            // baseColor : { type :'vec3', value: new THREE.Color( props.baseColor ) },
+            //tex01 : { type :'sampler2D', value: props.tex },
+            value : { type :'float', value: 3.0 },
+        },
+
+        extensions      : { 
+            derivatives : true
+        },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        // ################################################################
+
+        void main(){
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Spherical billboarding
+            vec3 xAxis = vec3( viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0] );
+            vec3 yAxis = vec3( viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1] );
+            // vec3 yAxis = vec3(0.0, 1.0, 0.0);					            // Cylindrical instead of spherical
+            vec3 pos   = ( xAxis * position.x ) + ( yAxis * position.y );	// Rotate vertex toward camera
+            
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            vec4 wPos 	        = modelMatrix * vec4( pos, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;               // View Space
+            
+            fragUV              = uv;
+            fragWPos            = wPos.xyz;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position			= projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+
+        in  vec3    fragWPos;
+        in  vec3    fragNorm;
+        in  vec2    fragUV;
+        out vec4    outColor;
+
+        uniform float value;
+        //#define PI		3.141592653589793
+        #define PI_2	6.283185307179586
+        //#define PI_H	1.5707963267948966
+        //#define PI_Q	0.7853981633974483
+
+        const vec3 baseColor		= vec3(0.5725,0.9764,0.4039);
+        const vec3 usedColor		= vec3(0.15);
+        const vec3 fadeColor	    = vec3(1.0,0.6509,0.0);
+
+        // ################################################################
+
+        void main(){
+            vec3 norm   = normalize( fragNorm );
+            outColor    = vec4( norm + baseColor.rgb, 1.0 );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            vec2 uv     = fragUV - 0.5;             // Shift origin to -0.5 to 0.5 range
+            float len   = length( uv );
+            float angle = atan( -uv.x, -uv.y ) - 0.001; // -PI to PI, minus to fix a single pixel width artifact
+            float nang  = ( angle / PI_2 + 0.5 );   // Remap to -0.5 to 0.5, then 0 to 1 
+
+            // float value = 1.0;
+            float use   = 0.05;
+            float aRing = 1.0 - clamp( value, 0.0, 1.0 );
+            float bRing = 1.0 - clamp( value - 1.0, 0.0, 1.0 );
+            float cRing = 1.0 - clamp( value - 2.0, 0.0, 1.0 );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Mask
+            float aMask = step( 0.12, len ) - step( 0.33, len );
+            float bMask = step( 0.36, len ) - step( 0.42, len );
+            float cMask = step( 0.45, len ) - step( 0.49, len );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Gradient Values
+            float aGrad  = step( aRing + use * step( 0.001, aRing ), nang ); // NAngle minus using amount
+            float auGrad = step( aRing, nang );     // NAngle
+
+            float bGrad  = step( bRing + use * step( 0.001, bRing ), nang );
+            float buGrad = step( bRing, nang );
+
+            float cGrad  = step( cRing + use * step( 0.001, cRing ), nang );
+            float cuGrad = step( cRing, nang );
+            
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Colors
+            vec3 aColor = mix( usedColor.rgb, fadeColor, auGrad );
+                 aColor = mix( aColor, baseColor, aGrad );
+
+            vec3 bColor = mix( usedColor.rgb, fadeColor, buGrad );
+                 bColor = mix( bColor, baseColor, bGrad );
+        
+            vec3 cColor = mix( usedColor.rgb, fadeColor, cuGrad );
+                 cColor = mix( cColor, baseColor, cGrad );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            outColor.rgb = aColor * aMask + bColor * bMask + cColor * cMask;
+            outColor.a   = aMask + bMask + cMask;
+
+        }`
+    });
+
+    // Object.defineProperty( mat, 'baseColor', { 
+    //     set: ( v )=>{ mat.uniforms.baseColor.value.set( v ); } 
+    // });
+
+    Object.defineProperty( mat, 'value', { 
+        set: ( v )=>{ mat.uniforms.value.value = v; } 
+    });
+    
+    return mat;
+}
+
+
+</script>
+
+<style>
+    *{ font-family: monospace; font-size:14px; }
+    .over{ position:fixed; bottom:10px; left:10px; }
+
+    .row{ display:flex; flex-direction:row; color:white; align-items: center; }
+    .row > label{ flex:0 0 100px; }
+</style>
+<div class="over">
+    <div class="row">
+        <label>Stamina</label>
+        <input type="range" id="inStamina" value="3" min="0" max="3" step="0.01" >
+    </div>
+</div>
+
+</body></html>

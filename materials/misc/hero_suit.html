@@ -1,0 +1,884 @@
+<!DOCTYPE html><html lang="en"><head><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script src="../../import-map.js"></script><script type="module">
+// #region IMPORTS
+import useThreeWebGL2, { useDarkScene, THREE } from '../../lib/useThreeWebGL2.js';
+import { UtilGltf2, Gltf2 } from '../../lib/loaders/UtilGltf2.js';
+// #endregion
+
+// #region MAIN
+let App   = useDarkScene( useThreeWebGL2() );
+let Debug = {};
+let Ref   = {};
+
+/*
+Original Model & Material was created by Weybec Animation Studio
+and released as a free Animation IK rig for blender
+
+https://twitter.com/weybecstudio/status/1676940428661358593?s=20
+https://twitter.com/dragoneex/status/1676941062886281218
+
+https://weybecstudio.gumroad.com/l/chameleon
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Sketchpunk Lab Changes
+- Removed all blender specific Rig stuff
+- Remove unneeded bones
+- Merges several bones to limit the bone count for web usage.
+- Renamed bones to make it easier parse
+- Wrote GLSL shader based on the blender node material that generates the suit patterns
+- Added vertex painting to easily select causal clothes parts in glsl.
+- Resized armature & model to 1.8 meters tall ( 6 Foot ). Its sized properly for threejs out of the box.
+
+*/
+
+
+window.addEventListener( 'load', async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.sphericalLook( 0, 20, 3, [0,0.9,0] );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    const gltf = await Gltf2.fetch( prepend + '/assets/hero/hero.gltf' );
+    const mat  = customMaterial()//new THREE.MeshPhongMaterial()
+    const mesh = UtilGltf2.loadMesh( gltf, null, mat ); 
+
+    App.scene.add( mesh );
+    Ref.mat = mat;
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.renderLoop();
+
+    setupUI();
+});
+
+function elm( id ){ return document.getElementById( id ) }
+function onIn( el, fn ){ el.addEventListener( 'input', fn ); }
+function setupUI(){
+    onIn( elm( 'inHero' ), e=>{ Ref.mat.hero = parseFloat( e.target.value ); updateLabel( e.target ); } );
+    onIn( elm( 'inSeed' ), e=>{ Ref.mat.seed = parseFloat( e.target.value ); updateLabel( e.target ); } );
+    onIn( elm( 'inRandom' ), e=>{ Ref.mat.random = parseFloat( e.target.value ); updateLabel( e.target ); } );
+    onIn( elm( 'inScale' ), e=>{ Ref.mat.scale = parseFloat( e.target.value ); updateLabel( e.target ); } );
+    onIn( elm( 'inWeight' ), e=>{ Ref.mat.weight = parseFloat( e.target.value ); updateLabel( e.target ); } );
+    onIn( elm( 'inHue' ), e=>{ Ref.mat.hue = parseFloat( e.target.value ); updateLabel( e.target ); } );
+
+
+    onIn( elm( 'inSkin' ), e=>{ Ref.mat.skin = e.target.value; } );
+    onIn( elm( 'inTShirt' ), e=>{ Ref.mat.tshirt = e.target.value; } );
+    onIn( elm( 'inPants' ), e=>{ Ref.mat.pants = e.target.value; } );
+    onIn( elm( 'inShoes' ), e=>{ Ref.mat.shoes = e.target.value; } );
+
+    onIn( elm( 'inColorA' ), e=>{ Ref.mat.A = e.target.value; } );
+    onIn( elm( 'inColorB' ), e=>{ Ref.mat.B = e.target.value; } );
+    onIn( elm( 'inColorC' ), e=>{ Ref.mat.C = e.target.value; } );
+}
+
+function updateLabel( elm ){
+    const p = elm.parentNode;
+    const c = p.querySelector( 'span' );
+    if( c ) c.innerHTML = elm.value;
+}
+
+// #endregion
+
+function customMaterial(  ){
+    const mat = new THREE.RawShaderMaterial({
+        name            : 'Grid',
+        // side            : THREE.DoubleSide,
+        depthTest       : true,
+        // transparent 	: true,
+        // alphaToCoverage : true,
+        // extensions      : { derivatives : true },
+
+        uniforms        : {
+
+            A   : { type: 'vec3',  value: new THREE.Color( 0xffffff ) },
+            B   : { type: 'vec3',  value: new THREE.Color( 0xFF7700 ) },
+            C   : { type: 'vec3',  value: new THREE.Color( 0x165664 ) },
+
+            skin   : { type: 'vec3',  value: new THREE.Color( 0xC78E7F ) },
+            tshirt : { type: 'vec3',  value: new THREE.Color( 0x4A4A4A ) },
+            pants  : { type: 'vec3',  value: new THREE.Color( 0x46748B ) },
+            shoes  : { type: 'vec3',  value: new THREE.Color( 0x100F0F ) },
+
+            hero    : { type: 'float', value: 1.0 },
+            seed    : { type: 'float', value: -2 },
+            random  : { type: 'float', value: 0.027 },
+            scale   : { type: 'float', value: 0.894 },
+            weight  : { type: 'float', value: 0.779 },
+            hue     : { type: 'float', value: 0.5 },
+        },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in  vec3    color;
+        in	vec2    uv;
+        
+        uniform mat4  modelMatrix;
+        uniform mat4  viewMatrix;
+        uniform mat4  projectionMatrix;
+
+        out vec3 fragWPos;
+        out vec3 fragLPos;
+        out vec3 fragNorm;
+        out vec2 fragUV;
+        out vec3 fragColor;
+
+        // ############################################################
+
+        void main(){
+            vec4 wPos     = modelMatrix * vec4( position, 1.0 );  // World Space
+            vec4 vPos     = viewMatrix * wPos;                    // View Space
+            gl_Position   = projectionMatrix * vPos;
+
+            // Fragment
+            fragUV      = uv;
+            fragNorm    = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+            fragLPos    = position;
+            fragWPos    = wPos.xyz;
+            fragColor   = color;
+        }`,
+
+        fragmentShader  : `#version 300 es
+    precision mediump float;
+
+    uniform vec3 cameraPosition;
+
+    uniform vec3  A;
+    uniform vec3  B;
+    uniform vec3  C;
+
+    uniform vec3  skin;
+    uniform vec3  shoes;
+    uniform vec3  tshirt;
+    uniform vec3  pants;
+
+    uniform float hero;
+    uniform float weight;
+    uniform float random;
+    uniform float scale;
+    uniform float seed;
+    uniform float hue;
+
+    in vec3 fragWPos;
+    in vec3 fragLPos;
+    in vec3 fragNorm;
+    in vec2 fragUV;
+    in vec3 fragColor;
+
+    out vec4 outColor;
+
+    // #region BLENDER GLSL
+    // #####################################################################
+    #define rot(x, k) (((x) << (k)) | ((x) >> (32 - (k))))
+    #define mixx(a, b, c) \
+    { \
+        a -= c; \
+        a ^= rot(c, 4); \
+        c += b; \
+        b -= a; \
+        b ^= rot(a, 6); \
+        a += c; \
+        c -= b; \
+        c ^= rot(b, 8); \
+        b += a; \
+        a -= c; \
+        a ^= rot(c, 16); \
+        c += b; \
+        b -= a; \
+        b ^= rot(a, 19); \
+        a += c; \
+        c -= b; \
+        c ^= rot(b, 4); \
+        b += a; \
+    }
+    #define final(a, b, c) \
+    { \
+        c ^= b; \
+        c -= rot(b, 14); \
+        a ^= c; \
+        a -= rot(c, 11); \
+        b ^= a; \
+        b -= rot(a, 25); \
+        c ^= b; \
+        c -= rot(b, 16); \
+        a ^= c; \
+        a -= rot(c, 4); \
+        b ^= a; \
+        b -= rot(a, 14); \
+        c ^= b; \
+        c -= rot(b, 24); \
+    }
+
+    uint hash_uint3( uint kx, uint ky, uint kz ){
+        uint a, b, c;
+        a = b = c = 0xdeadbeefu + ( 3u << 2u ) + 13u;
+        c += kz;
+        b += ky;
+        a += kx;
+        final( a, b, c );
+        return c;
+    }
+
+    uint hash_uint4( uint kx, uint ky, uint kz, uint kw ){
+        uint a, b, c;
+        a = b = c = 0xdeadbeefu + ( 4u << 2u ) + 13u;
+
+        a += kx;
+        b += ky;
+        c += kz;
+        mixx(a, b, c);
+
+        a += kw;
+        final(a, b, c);
+
+        return c;
+    }
+
+    float hash_uint4_to_float(uint kx, uint ky, uint kz, uint kw){ return float(hash_uint4(kx, ky, kz, kw)) / float(0xFFFFFFFFu); }
+    float hash_uint3_to_float(uint kx, uint ky, uint kz){ return float(hash_uint3(kx, ky, kz)) / float(0xFFFFFFFFu); }
+    float hash_vec3_to_float(vec3 k){ return hash_uint3_to_float(floatBitsToUint(k.x), floatBitsToUint(k.y), floatBitsToUint(k.z)); }
+    float hash_vec4_to_float(vec4 k){ return hash_uint4_to_float(floatBitsToUint(k.x), floatBitsToUint(k.y), floatBitsToUint(k.z), floatBitsToUint(k.w)); }
+    vec3 hash_vec3_to_vec3(vec3 k){ return vec3(hash_vec3_to_float(k), hash_vec4_to_float(vec4(k, 1.0)), hash_vec4_to_float(vec4(k, 2.0))); }
+
+    // Original https://github.com/blender/blender/blob/main/source/blender/gpu/shaders/material/gpu_shader_material_voronoi.glsl#L538
+    // MODIFIED: Returning color value & using Euclidean distance
+    vec3 voronoi_f2( vec3 coord, float randomness ){
+        vec3  cellPosition  = floor(coord);
+        vec3  localPosition = coord - cellPosition;
+        float distanceF1    = 8.0;
+        float distanceF2    = 8.0;
+        vec3  offsetF1      = vec3(0.0);
+        vec3  positionF1    = vec3(0.0);
+        vec3  offsetF2      = vec3(0.0);
+        vec3  positionF2    = vec3(0.0);
+
+        for( int k = -1; k <= 1; k++ ){
+            for( int j = -1; j <= 1; j++ ){
+                for( int i = -1; i <= 1; i++ ){
+                    vec3 cellOffset       = vec3(i, j, k);
+                    vec3 pointPosition    = cellOffset + hash_vec3_to_vec3(cellPosition + cellOffset) * randomness;
+                    float distanceToPoint = distance( pointPosition, localPosition ); // Euclidean Distance
+                    // float distanceToPoint = voronoi_distance(pointPosition, localPosition, params);
+                    
+                    if( distanceToPoint < distanceF1 ){
+                        distanceF2 = distanceF1;
+                        distanceF1 = distanceToPoint;
+                        offsetF2   = offsetF1;
+                        offsetF1   = cellOffset;
+                        positionF2 = positionF1;
+                        positionF1 = pointPosition;
+
+                    }else if( distanceToPoint < distanceF2 ){
+                        distanceF2 = distanceToPoint;
+                        offsetF2   = cellOffset;
+                        positionF2 = pointPosition;
+                    }
+                }
+            }
+        }
+
+        //   VoronoiOutput octave;
+        //   octave.Distance = distanceF2;
+        //   octave.Color = hash_vec3_to_vec3(cellPosition + offsetF2);
+        //   octave.Position = voronoi_position(positionF2 + cellPosition);
+        //   return octave;
+        return hash_vec3_to_vec3( cellPosition + offsetF2 ); // Color
+    }
+
+    float voronoi_f1( vec3 coord, float randomness ){
+        vec3 cellPosition   = floor(coord);
+        vec3 localPosition  = coord - cellPosition;
+        float minDistance   = 8.0;
+        vec3 targetOffset   = vec3(0.0);
+        vec3 targetPosition = vec3(0.0);
+
+        for( int k = -1; k <= 1; k++ ){
+            for( int j = -1; j <= 1; j++ ){
+                for( int i = -1; i <= 1; i++ ){
+                    vec3 cellOffset       = vec3(i, j, k);
+                    vec3 pointPosition    = cellOffset + hash_vec3_to_vec3(cellPosition + cellOffset) * randomness;
+                    float distanceToPoint = distance( pointPosition, localPosition ); // Euclidean Distance
+                    // float distanceToPoint = voronoi_distance(pointPosition, localPosition, params);
+
+                    if (distanceToPoint < minDistance) {
+                        targetOffset   = cellOffset;
+                        minDistance    = distanceToPoint;
+                        targetPosition = pointPosition;
+                    }
+                }
+            }
+        }
+
+        //   VoronoiOutput octave;
+        //   octave.Distance = minDistance;
+        //   octave.Color = hash_vec3_to_vec3(cellPosition + targetOffset);
+        //   octave.Position = voronoi_position(targetPosition + cellPosition);
+
+        return minDistance;
+    }
+
+    // https://github.com/blender/blender/blob/main/source/blender/gpu/shaders/common/gpu_shader_common_color_utils.glsl#L1
+    void rgb_to_hsv( vec4 rgb, out vec4 outcol ){
+        float cmax, cmin, h, s, v, cdelta;
+        vec3 c;
+
+        cmax   = max(rgb[0], max(rgb[1], rgb[2]));
+        cmin   = min(rgb[0], min(rgb[1], rgb[2]));
+        cdelta = cmax - cmin;
+
+        v = cmax;
+
+        if( cmax != 0.0 ){ 
+            s = cdelta / cmax; 
+        }else{ 
+            s = 0.0; 
+            h = 0.0;
+        }
+        
+        if( s == 0.0 ){ 
+            h = 0.0;
+        }else{
+            c = (vec3(cmax) - rgb.xyz) / cdelta;
+
+            if( rgb.x == cmax )      h = c[2] - c[1];
+            else if( rgb.y == cmax ) h = 2.0 + c[0] - c[2];
+            else                     h = 4.0 + c[1] - c[0];
+
+            h /= 6.0;
+
+            if( h < 0.0 ) h += 1.0;
+        }
+
+        outcol = vec4( h, s, v, rgb.w );
+    }
+
+    // https://github.com/blender/blender/blob/main/source/blender/gpu/shaders/common/gpu_shader_common_color_utils.glsl#L45
+    void hsv_to_rgb(vec4 hsv, out vec4 outcol){
+        float i, f, p, q, t, h, s, v;
+        vec3 rgb;
+
+        h = hsv[0];
+        s = hsv[1];
+        v = hsv[2];
+
+        if( s == 0.0 ){
+            rgb = vec3(v, v, v);
+        }else{
+            if(h == 1.0) h = 0.0;
+
+            h  *= 6.0;
+            i   = floor(h);
+            f   = h - i;
+            rgb = vec3(f, f, f);
+            p   = v * (1.0 - s);
+            q   = v * (1.0 - (s * f));
+            t   = v * (1.0 - (s * (1.0 - f)));
+
+            if( i == 0.0 )       rgb = vec3(v, t, p);
+            else if( i == 1.0 )  rgb = vec3(q, v, p);
+            else if( i == 2.0 )  rgb = vec3(p, v, t);
+            else if( i == 3.0 )  rgb = vec3(p, q, v);
+            else if( i == 4.0 )  rgb = vec3(t, p, v);
+            else                 rgb = vec3(v, p, q);
+        }
+
+        outcol = vec4( rgb, hsv.w );
+    }
+
+    // Modified: https://github.com/blender/blender/blob/main/source/blender/gpu/shaders/material/gpu_shader_material_hue_sat_val.glsl
+    vec4 hue_sat( float hue, float sat, float value, float fac, vec4 col ){
+        vec4 hsv;
+        vec4 outcol;
+
+        rgb_to_hsv( col, hsv );
+
+        hsv[0] = fract( hsv[0] + hue + 0.5 );
+        hsv[1] = clamp( hsv[1] * sat, 0.0, 1.0 );
+        hsv[2] = hsv[2] * value;
+
+        hsv_to_rgb( hsv, outcol );
+        return mix( col, outcol, fac );
+    }
+
+
+    float fresnel_dielectric_cos(float cosi, float eta){
+        // compute fresnel reflectance without explicitly computing the refracted direction
+        float c = abs(cosi);
+        float g = eta * eta - 1.0 + c * c;
+        float result;
+
+        if (g > 0.0) {
+            g       =  sqrt(g);
+            float A = (g - c) / (g + c);
+            float B = (c * (g + c) - 1.0) / (c * (g - c) + 1.0);
+            result  = 0.5 * A * A * (1.0 + B * B);
+        }else {
+            result = 1.0; // TIR (no refracted component)
+        }
+
+        return result;
+    }
+
+    // compute fresnel reflectance without explicitly computing the refracted direction 
+    float fresnel_dielectric( vec3 Incoming, vec3 Normal, float eta ){
+        return fresnel_dielectric_cos( dot( Incoming, Normal ), eta );
+    }
+
+    // https://github.com/blender/blender/blob/main/source/blender/gpu/shaders/material/gpu_shader_material_fresnel.glsl#L29C1-L36C2
+    float node_fresnel( float ior, vec3 N, vec3 V ){
+        //vec3 V = cameraVec( g_data.P );
+
+        float eta = max( ior, 0.00001 );
+        // result = fresnel_dielectric( V, N, (FrontFacing) ? eta : 1.0 / eta );
+        return fresnel_dielectric( V, N, eta );
+    }
+
+    // #####################################################################
+
+    #define FLOORFRAC(x, x_int, x_fract) { float x_floor = floor(x); x_int = int(x_floor); x_fract = x - x_floor; }
+    float fade(float t){ return t * t * t * (t * (t * 6.0 - 15.0) + 10.0); }
+    float negate_if(float value, uint condition){ return (condition != 0u) ? -value : value; }
+    float noise_scale3(float result){ return 0.9820 * result; }
+
+    float tri_mix(float v0, float v1, float v2, float v3, float v4, float v5, float v6, float v7, float x, float y, float z ){
+        float x1 = 1.0 - x;
+        float y1 = 1.0 - y;
+        float z1 = 1.0 - z;
+        return z1 * (y1 * (v0 * x1 + v1 * x) + y * (v2 * x1 + v3 * x)) +
+                z * (y1 * (v4 * x1 + v5 * x) + y * (v6 * x1 + v7 * x));
+    }
+
+    uint hash_uint2( uint kx, uint ky ){
+        uint a, b, c;
+        a = b = c = 0xdeadbeefu + (2u << 2u) + 13u;
+
+        b += ky;
+        a += kx;
+        final(a, b, c);
+
+        return c;
+    }
+
+    uint hash_int3(int kx, int ky, int kz){ return hash_uint3(uint(kx), uint(ky), uint(kz)); }
+    float hash_uint2_to_float(uint kx, uint ky){ return float(hash_uint2(kx, ky)) / float(0xFFFFFFFFu); }
+    float hash_vec2_to_float(vec2 k){ return hash_uint2_to_float(floatBitsToUint(k.x), floatBitsToUint(k.y)); }
+
+    vec3 random_vec3_offset(float seed){
+        return vec3(100.0 + hash_vec2_to_float(vec2(seed, 0.0)) * 100.0,
+                    100.0 + hash_vec2_to_float(vec2(seed, 1.0)) * 100.0,
+                    100.0 + hash_vec2_to_float(vec2(seed, 2.0)) * 100.0);
+    }
+
+    float noise_grad( uint hash, float x, float y, float z ){
+        uint h   = hash & 15u;
+        float u  = h < 8u ? x : y;
+        float vt = ((h == 12u) || (h == 14u)) ? x : z;
+        float v  = h < 4u ? y : vt;
+        return negate_if(u, h & 1u) + negate_if(v, h & 2u);
+    }
+
+    float noise_grad( uint hash, float x, float y, float z, float w ){
+        uint h  = hash & 31u;
+        float u = h < 24u ? x : y;
+        float v = h < 16u ? y : z;
+        float s = h < 8u ? z : w;
+        return negate_if(u, h & 1u) + negate_if(v, h & 2u) + negate_if(s, h & 4u);
+    }
+
+    float noise_perlin(vec3 vec){
+        int X, Y, Z;
+        float fx, fy, fz;
+
+        FLOORFRAC( vec.x, X, fx );
+        FLOORFRAC( vec.y, Y, fy );
+        FLOORFRAC( vec.z, Z, fz );
+
+        float u = fade(fx);
+        float v = fade(fy);
+        float w = fade(fz);
+
+        float r = tri_mix(  noise_grad(hash_int3(X, Y, Z), fx, fy, fz),
+                            noise_grad(hash_int3(X + 1, Y, Z), fx - 1.0, fy, fz),
+                            noise_grad(hash_int3(X, Y + 1, Z), fx, fy - 1.0, fz),
+                            noise_grad(hash_int3(X + 1, Y + 1, Z), fx - 1.0, fy - 1.0, fz),
+                            noise_grad(hash_int3(X, Y, Z + 1), fx, fy, fz - 1.0),
+                            noise_grad(hash_int3(X + 1, Y, Z + 1), fx - 1.0, fy, fz - 1.0),
+                            noise_grad(hash_int3(X, Y + 1, Z + 1), fx, fy - 1.0, fz - 1.0),
+                            noise_grad(hash_int3(X + 1, Y + 1, Z + 1), fx - 1.0, fy - 1.0, fz - 1.0),
+                            u,
+                            v,
+                            w );
+        return r;
+    }
+
+    float snoise(vec3 p){
+        float r = noise_perlin(p);
+        return (isinf(r)) ? 0.0 : noise_scale3(r);
+    }
+
+    float noise(vec3 p){ return 0.5 * snoise(p) + 0.5; }
+
+    // The fractal_noise functions are all exactly the same except for the input type.
+    float fractal_noise( vec3 p, float octaves, float roughness ){
+        float fscale = 1.0;
+        float amp    = 1.0;
+        float maxamp = 0.0;
+        float sum    = 0.0;
+        octaves      = clamp(octaves, 0.0, 15.0);
+        
+        int n = int(octaves);
+        for( int i = 0; i <= n; i++ ){
+            float t = noise(fscale * p);
+            sum    += t * amp;
+            maxamp += amp;
+            amp    *= clamp(roughness, 0.0, 1.0);
+            fscale *= 2.0;
+        }
+
+        float rmd = octaves - floor(octaves);
+        if(rmd != 0.0){
+            float t    = noise(fscale * p);
+            float sum2 = sum + t * amp;
+            sum       /= maxamp;
+            sum2      /= maxamp + amp;
+            return (1.0 - rmd) * sum + rmd * sum2;
+        }else{
+            return sum / maxamp;
+        }
+    }
+
+    float node_noise_texture_3d( vec3 co, float w, float scale, float detail, float roughness, float distortion ){
+        vec3 p = co * scale;
+        if( distortion != 0.0 ){
+            p += vec3(snoise(p + random_vec3_offset(0.0)) * distortion,
+                    snoise(p + random_vec3_offset(1.0)) * distortion,
+                    snoise(p + random_vec3_offset(2.0)) * distortion);
+        }
+
+        //   value = fractal_noise(p, detail, roughness);
+        //   color = vec4(value,
+        //                fractal_noise(p + random_vec3_offset(3.0), detail, roughness),
+        //                fractal_noise(p + random_vec3_offset(4.0), detail, roughness),
+        //                1.0);
+
+        return fractal_noise( p, detail, roughness );
+    }
+
+    // #####################################################################
+    
+    // https://github.com/blender/blender/blob/fdc0402a506225cd9f490460270bc4f3d1f6a78b/source/blender/gpu/shaders/common/gpu_shader_common_mix_rgb.glsl#L98C1-L102C2
+    vec3 mix_diff( float fac, vec3 col1, vec3 col2){ return mix( col1, abs(col1 - col2), fac ); }
+
+    //  https://github.com/blender/blender/blob/fdc0402a506225cd9f490460270bc4f3d1f6a78b/source/blender/gpu/shaders/common/gpu_shader_common_mix_rgb.glsl#L15C1-L19C2
+    vec3 mix_mult( float fac, vec3 col1, vec3 col2 ){ return mix(col1, col1 * col2, fac); }
+
+    // #####################################################################
+    // #endregion
+
+    // #region CUSTOM GLSL
+    vec3 rgb( int c ){
+        return vec3(
+            float( ( c >> 16 ) & 0xff ) * 0.00392156863,
+            float( ( c >> 8 ) & 0xff ) * 0.00392156863,
+            float( c & 0xff ) * 0.00392156863
+        );
+    }
+
+    vec3 color5ConstRamp( vec3[5] color, float[5] wgt, float t ){
+        for( int i = 4; i > 0; i-- ){
+            if( t >= wgt[ i ]  ) return color[ i ];
+        }
+        return color[ 0 ];
+    }
+
+    vec3 color2LinearRamp( vec3[2] color, float[2] wgt, float t ){
+        int cnt = 2;
+        for( int i=1; i < cnt; i++ ){
+            if( t <= wgt[ i ] ){
+                return mix( 
+                    color[ i-1 ], 
+                    color[ i ],
+                    //smoothstep( wgt[ i-1 ], wgt[ i ] , t )
+                    clamp( 0.0, 1.0, ( t - wgt[ i-1 ] ) / ( wgt[ i ] - wgt[ i-1] ) )
+                );
+            }
+        }
+        return color[ cnt-1 ];
+    }
+
+    float remap( float value, float min1, float max1, float min2, float max2 ){
+        return min2 + (value - min1) * (max2 - min2) / (max1 - min1);
+    }
+    // #endregion
+
+    // #####################################################################
+
+    // #region SUPER SUIT
+    vec3 superSuit(){
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Get initial noise color
+        vec3 coord  = vec3( fragUV.x+seed, fragUV.y, 0.0 );
+        vec3 vColor = voronoi_f2( coord * scale, random );
+        vColor      = hue_sat( 0.5, 1.0, weight, 1.0, vec4(vColor, 1.0) ).rgb; // Dim the color by using HUE.
+        // return vColor;
+        
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Use a color ramp to remap the noise
+        vec3  rCol[5] = vec3[]( rgb(0x0000ff), rgb(0xff0000), rgb(0xffffff), rgb(0x00ff00), rgb(0xffffff) );
+        float rWgt[5] = float[]( 0.0, 0.218182, 0.472727, 0.641818, 0.827273 );
+        
+        // NOTE: I couldn't find how blender handles a COLOR input for a Color Ramp Node.
+        // So this part is a bit of a wildcard & just guess work,
+
+        // Try applying each component to the ramp & save just the component.
+        // vec3  rColor  = vec3(
+        //     color5ConstRamp( rCol, rWgt, vColor.r ).r,
+        //     color5ConstRamp( rCol, rWgt, vColor.g ).g,
+        //     color5ConstRamp( rCol, rWgt, vColor.b ).b
+        // );
+        
+        // Try getting an average color instead.
+        vec3  rColor = (
+            color5ConstRamp( rCol, rWgt, vColor.r ) +
+            color5ConstRamp( rCol, rWgt, vColor.g ) +
+            color5ConstRamp( rCol, rWgt, vColor.b ) ) * 0.3333;
+
+        rColor = clamp( rColor, 0.0, 1.0 );
+
+        rColor.r = smoothstep( 0.4, 0.6, rColor.r );
+        rColor.g = smoothstep( 0.4, 0.6, rColor.g );
+        rColor.b = smoothstep( 0.9, 1.0, rColor.b );
+
+        // return rColor;
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Use the Remapped noise color to mix the 3 color pallet give by user
+        vec3 mColor = mix( 
+            mix( A, B, rColor.g ), 
+            C, 
+            rColor.r
+        );
+
+        // Dont know why the original nodes does this
+        // Seems to make the colors a tiny bit darker or duller
+        // May be something that can be removed.
+        mColor = hue_sat( hue, 2.0, 1.0, 1.0, vec4(mColor, 1.0) ).rgb; 
+        
+        return mColor;
+    }
+    // #endregion
+
+    // #region CASUAL SUIT
+    vec3 casualSuit(){
+        vec3 cColor = mix( skin,   tshirt, fragColor.r );
+             cColor = mix( cColor, pants,  fragColor.g );
+             cColor = mix( cColor, shoes,  fragColor.b );
+        return cColor;
+    }   
+    // #endregion
+
+    // #region TRANSITION MASK
+    vec3 transitionMask( out float nOut ){
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Compute a Transition Pattern
+
+        // Grid Pattern to create particle-like pattern
+        float nv = voronoi_f1( fragLPos * 45.0 , 0.0 );
+        // return vec3( nv );
+
+        // Bigger cloudy pattern
+        float nt = node_noise_texture_3d( fragLPos * 0.28, 1.0, 6.150, 0.0, 0.0, 0.0 );
+
+        nOut = nt;
+        if( nt < 0.0 ) return vec3( 1.0, 0.0, 0.0 );
+
+        // return vec3( nt );
+
+        // Original Blender material does a remap, which works better then my
+        // attemp to replace it with smoothstep. Not
+        float nt2 = remap( nt, clamp(hero+0.02, 0.0, 1.0), 1.0, 0.0, 1.0 );
+        // nt2 = smoothstep( clamp(hero+0.02, 0.0, 1.0), 1.0, nt );
+        // return vec3( nt2 );
+
+        // Mix the two patterns with cloudy taking most of the mix
+        float nm = mix( nv, nt2, 0.875 );
+        // return vec3( nm );
+        
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Colorize the pattern
+        vec3  tCol[2]   = vec3[]( rgb(0xFF9000), rgb(0x000000) );
+        float tWgt[2]   = float[]( 0.140909, 0.195455 );
+        vec3  tranColor = color2LinearRamp( tCol, tWgt, nm );
+        tranColor       = mix_mult( 1.0, tranColor, vec3( nt > hero+0.02? 1.0 : 0.0 ) );
+
+        return tranColor;
+    }
+    // #endregion
+
+    // #region LIGHTING
+    
+    float customLighting(){
+        vec3  rCol[5] = vec3[]( rgb(0x606060), rgb(0x606060), rgb(0xd0d0d0), rgb(0xd0d0d0), rgb(0xffffff) );
+        float rWgt[5] = float[]( 0.0, 0.1, 0.3, 0.8, 0.95 );
+
+        vec3 lightPos = vec3( 2.0, 2.0, 2.0 );
+        vec3 toLit    = normalize( lightPos - fragWPos );
+        vec3 norm     = normalize( fragNorm );
+        float diffuse = clamp( dot( toLit, norm ), 0.0, 1.0 );
+
+        return color5ConstRamp( rCol, rWgt, diffuse ).r;
+    }
+    // #endregion
+
+    // #####################################################################
+
+    void main(){                          
+        outColor = vec4( fragUV, 1.0, 1.0 );
+        
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Compute colored suits
+        vec3 colSuper   = superSuit();
+        vec3 colCasual  = casualSuit();
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Get Transition noise mask & colored pattern
+        float n;
+        vec3 colTrans   = transitionMask( n );
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Get transition color between two suits
+        vec3 colSuit    = mix( colSuper, colCasual,  n > hero? 1.0 : 0.0 );
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // White border added to transition
+        vec3 maskBorder = mix_diff( 1.0, vec3( n > hero+0.02? 1.0 : 0.0 ), vec3( n > hero? 1.0 : 0.0 ) );
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        float lit    = customLighting();
+        outColor.rgb = ( colSuit * lit ) + maskBorder + colTrans;
+        
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Debug
+        // outColor.rgb = superSuit();
+        // outColor.rgb = casualSuit();
+        // outColor.rgb = transitionMask();
+        // outColor.rgb = vec3( n );
+        // outColor.rgb = colSuit;
+        // outColor.rgb = maskBorder;
+    }`
+    });
+
+    Object.defineProperty( mat, 'skin', { set( c ){ mat.uniforms.skin.value.set( c ); }, });
+    Object.defineProperty( mat, 'tshirt', { set( c ){ mat.uniforms.tshirt.value.set( c ); }, });
+    Object.defineProperty( mat, 'pants', { set( c ){ mat.uniforms.pants.value.set( c ); }, });
+    Object.defineProperty( mat, 'shoes', { set( c ){ mat.uniforms.shoes.value.set( c ); }, });
+
+    Object.defineProperty( mat, 'A', { set( c ){ mat.uniforms.A.value.set( c ); }, });
+    Object.defineProperty( mat, 'B', { set( c ){ mat.uniforms.B.value.set( c ); }, });
+    Object.defineProperty( mat, 'C', { set( c ){ mat.uniforms.C.value.set( c ); }, });
+
+    Object.defineProperty( mat, 'hero', { set( v ){ mat.uniforms.hero.value = v; }, });
+    Object.defineProperty( mat, 'seed', { set( v ){ mat.uniforms.seed.value = v; }, });
+    Object.defineProperty( mat, 'random', { set( v ){ mat.uniforms.random.value = v; }, });
+    Object.defineProperty( mat, 'scale', { set( v ){ mat.uniforms.scale.value = v; }, });
+    Object.defineProperty( mat, 'weight', { set( v ){ mat.uniforms.weight.value = v; }, });
+    Object.defineProperty( mat, 'hue', { set( v ){ mat.uniforms.hue.value = v; }, });
+
+    return mat;
+}
+
+</script>
+
+<style>
+    *{ font-family: monospace; font-size:14px; }
+    .over{ position:fixed; bottom:10px; left:10px; }
+
+    .row{ display:flex; flex-direction:row; color:white; align-items: center; }
+    .row > label{ flex:0 0 100px; }
+    .row > span{ flex:0 0 40px; text-align:right; }
+
+    h2{ color:white; margin-bottom:5px; font-size:16px; color:#ffff00; }
+
+    input[type='color']{ background:none; border-width:0px; cursor:pointer; padding:0px; height:16px; }
+
+    input[type='color']::-webkit-color-swatch-wrapper{ padding:0px; }
+    input[type='color']::-webkit-color-swatch{ border-width:1px; border-radius:4px; }
+</style>
+<div class="over">
+    <div class="row">
+        <label>Transition</label>
+        <input type="range" id="inHero" value="1.0" min="0" max="1" step="0.01" >
+        <span>1</span>
+    </div>
+
+    <h2>Super Suit Params</h2>
+    <div class="row">
+        <label>Seed</label>
+        <input type="range" id="inSeed" value="-2" min="-3" max="3" step="0.01" >
+        <span>-2</span>
+    </div>
+
+    <div class="row">
+        <label>Random</label>
+        <input type="range" id="inRandom" value="0.027" min="0" max="1" step="0.001" >
+        <span>0.027</span>
+    </div>
+
+    <div class="row">
+        <label>Scale</label>
+        <input type="range" id="inScale" value="0.894" min="0.001" max="1" step="0.001" >
+        <span>0.894</span>
+    </div>
+
+    <div class="row">
+        <label>Weight</label>
+        <input type="range" id="inWeight" value="0.779" min="0" max="2" step="0.001" >
+        <span>0.779</span>
+    </div>
+
+    <div class="row">
+        <label>Hue</label>
+        <input type="range" id="inHue" value="0.5" min="0" max="1" step="0.001" >
+        <span>0.5</span>
+    </div>
+
+    <div class="row">
+        <label>Color A</label>
+        <input type="color" class="picker" id="inColorA" value="#ffffff" >
+    </div>
+
+    <div class="row">
+        <label>Color B</label>
+        <input type="color" class="picker" id="inColorB" value="#FF7700" >
+    </div>
+
+    <div class="row">
+        <label>Color C</label>
+        <input type="color" class="picker" id="inColorC" value="#165664" >
+    </div>
+
+    <h2>Casual Colors</h2>
+    <div class="row">
+        <label>Skin</label>
+        <input type="color" class="picker" id="inSkin" value="#C78E7F" >
+    </div>
+
+    <div class="row">
+        <label>TShirt</label>
+        <input type="color" class="picker" id="inTShirt" value="#4A4A4A" >
+    </div>
+
+    <div class="row">
+        <label>Pants</label>
+        <input type="color" class="picker" id="inPants" value="#46748B" >
+    </div>
+
+    <div class="row">
+        <label>Shoes</label>
+        <input type="color" class="picker" id="inShoes" value="#100F0F" >
+    </div>
+</div>
+
+</body></html>

@@ -1,0 +1,20 @@
+float voronoi_distance(vec3 a, vec3 b, VoronoiParams params)
+{
+  if (params.metric == SHD_VORONOI_EUCLIDEAN) {
+    return distance(a, b);
+  }
+  else if (params.metric == SHD_VORONOI_MANHATTAN) {
+    return abs(a.x - b.x) + abs(a.y - b.y) + abs(a.z - b.z);
+  }
+  else if (params.metric == SHD_VORONOI_CHEBYCHEV) {
+    return max(abs(a.x - b.x), max(abs(a.y - b.y), abs(a.z - b.z)));
+  }
+  else if (params.metric == SHD_VORONOI_MINKOWSKI) {
+    return pow(pow(abs(a.x - b.x), params.exponent) + pow(abs(a.y - b.y), params.exponent) +
+                   pow(abs(a.z - b.z), params.exponent),
+               1.0 / params.exponent);
+  }
+  else {
+    return 0.0;
+  }
+}
