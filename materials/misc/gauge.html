@@ -1,0 +1,228 @@
+<!DOCTYPE html><html lang="en"><head><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script src="../../../import-map.js"></script><script type="module">
+import useThreeWebGL2, { useDarkScene, THREE } from '../../lib/useThreeWebGL2.js';
+
+
+let App   = useDarkScene( useThreeWebGL2() );
+let Ref   = {};
+
+window.addEventListener( 'load', async _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.sphericalLook( 0, 20, 3, [0,0.5,0]);
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const mat  = customMaterial();
+    Ref.mat    = mat;
+    
+    const geo  = new THREE.PlaneGeometry( 1, 1 );
+    const mesh = new THREE.Mesh( geo, mat );
+    mesh.position.y = 0.5;
+    App.scene.add( mesh );
+    
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.renderLoop();
+    // setupUI();
+});
+
+// function elm( id ){ return document.getElementById( id ) }
+// function onIn( el, fn ){ el.addEventListener( 'input', fn ); }
+// function setupUI(){
+//     onIn( elm( 'inStamina' ), e=>{ Ref.mat.value = parseFloat( e.target.value ); } );
+// }
+
+function customMaterial( props ){
+    // #region PROPS
+    // props = Object.assign( {
+        // baseColor : 0x00ffff,
+        // tex       : null,
+    // }, props );
+    // #endregion
+
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        side            : THREE.DoubleSide,
+        transparent     : true, 
+        // forceSinglePass : true,             
+        // alphaToCoverage : true,             
+        // lights          : true,
+
+        uniforms        : {
+            // baseColor : { type :'vec3', value: new THREE.Color( props.baseColor ) },
+            //tex01 : { type :'sampler2D', value: props.tex },
+            value : { type :'float', value: 3.0 },
+        },
+
+        extensions      : { 
+            derivatives : true
+        },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        // ################################################################
+
+        void main(){
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Spherical billboarding
+            vec3 xAxis = vec3( viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0] );
+            vec3 yAxis = vec3( viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1] );
+            // vec3 yAxis = vec3(0.0, 1.0, 0.0);					            // Cylindrical instead of spherical
+            vec3 pos   = ( xAxis * position.x ) + ( yAxis * position.y );	// Rotate vertex toward camera
+            
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            vec4 wPos 	        = modelMatrix * vec4( pos, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;               // View Space
+            
+            fragUV              = uv;
+            fragWPos            = wPos.xyz;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position			= projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+
+        in  vec3    fragWPos;
+        in  vec3    fragNorm;
+        in  vec2    fragUV;
+        out vec4    outColor;
+
+        uniform float value;
+
+        #define PI          3.14159265359
+        #define PI2         6.28318530718
+        #define PI2_INV     0.15915494309
+        #define DEG2RAD     0.01745329251  // PI / 180
+
+        // ################################################################
+
+        float sdfSegment( vec2 p, vec2 a, vec2 b ){
+            vec2 pa = p-a;
+            vec2 ba = b-a;
+            float h = clamp( dot( pa, ba ) / dot( ba, ba ), 0.0, 1.0 );
+            return length( pa - ba * h );
+        }
+
+        float ring( vec2 coord, float outer, float inner ){ 
+            float radius = dot( coord, coord );
+            float dxdy   = fwidth( radius );
+            return  smoothstep( inner - dxdy, inner + dxdy, radius ) - 
+                    smoothstep( outer - dxdy, outer + dxdy, radius );
+        }
+
+        // https://www.shadertoy.com/view/XtXyDn
+        float arc( vec2 uv, vec2 up, float angle, float radius, float thick ){
+            float hAngle = angle * 0.5;
+
+            // vector from the circle origin to the middle of the arc
+            float c  = cos( hAngle );
+            
+            // smoothing perpendicular to the arc
+            float d1 = abs( length( uv ) - radius ) - thick;
+            float w1 = 1.5 * fwidth( d1 ); // proportional to how much d1 change between pixels
+            float s1 = smoothstep( w1 * 0.5, -w1 * 0.5, d1 ); 
+
+            // smoothing along the arc
+            float d2 = dot( up, normalize( uv ) ) - c;
+            float w2 = 1.5 * fwidth( d2 ); // proportional to how much d2 changes between pixels
+            float s2 = smoothstep( w2 * 0.5, -w2 * 0.5, d2 ); 
+
+            // mix perpendicular and parallel smoothing
+            return s1 * ( 1.0 - s2 );
+        }
+
+        // ################################################################
+
+        void main(){
+            vec2  uv    = fragUV * 2.0 - 1.0;
+            vec3 norm   = normalize( fragNorm );
+            outColor    = vec4( norm, 1.0 );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Render Step Segments
+            float inc     = radians( 2.0 );             // Degrees for each minor step
+            float steps   = PI2 / inc;                  // Step Count around circle
+            float fragAng = atan( uv.y, uv.x );         // Angle of Fragment from Center
+            float gradAng = fract( fragAng * PI2_INV ); // 0:360 mapped to 0:1
+
+            float aStep     = steps * gradAng;          // Divide the Gradient by the number of steps, Gives whole+fract value
+            float gradStep  = fract( aStep );           // For each angle step, get a 0:1 Mapping
+
+            // Snap Step to next whole number
+            float snapStep  = ( gradStep >= 0.5 )? ceil( aStep ) : floor( aStep ); // round doesn't work
+            float snapAngle = snapStep * inc;     // Get the Center Angle of the Sector
+            vec2 dir        = vec2(               // Compute Direction, Normalized by default
+                cos( snapAngle ),
+                sin( snapAngle )
+            );
+
+            // Set Different Lengths for different increments
+            float len = 0.93;   // Small incs
+            if( mod( snapStep, 5.0 )  <= 0.9999 ) len = 0.87; // Mid Incs
+            if( mod( snapStep, 45.0 ) <= 0.9999 ) len = 0.8;  // Quarter Incs
+
+            // Get pixel's distance from Line Segment
+            float thick = 0.002;
+            float d     = sdfSegment( uv, dir * len, dir * 1.0 ) - thick;
+
+            float fw = fwidth( uv.x );             // Apply Anti-Alias to Lines
+            d  = 1.0 - clamp( d / fw, 0.0, 1.0 );
+            d *= 1.0 - step( 0.98, length( uv ) ); // Mask out any lines outside of ring radius
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Draw angle 0 to 90
+            float radSpread = radians( 90.0 );                            // Total Angle from Start to finish
+            float radCenter = radians( 45.0 );                            // Angle of the center of the arc wanting to draw
+            vec2  radDir    = vec2( cos( radCenter ), sin( radCenter ) ); // Compute Direction of that center angle
+
+            d = max( d, arc( uv, radDir, radSpread, 0.58, 0.42 ) * 0.3 );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Draw outer ring
+            d = max( d, ring( uv, 0.98, 0.92 ) );
+
+            outColor.rgb = vec3( d );
+        }`
+    });
+
+    // Object.defineProperty( mat, 'baseColor', { 
+    //     set: ( v )=>{ mat.uniforms.baseColor.value.set( v ); } 
+    // });
+
+    Object.defineProperty( mat, 'value', { 
+        set: ( v )=>{ mat.uniforms.value.value = v; } 
+    });
+    
+    return mat;
+}
+
+
+</script>
+
+<!-- <style>
+    *{ font-family: monospace; font-size:14px; }
+    .over{ position:fixed; bottom:10px; left:10px; }
+
+    .row{ display:flex; flex-direction:row; color:white; align-items: center; }
+    .row > label{ flex:0 0 100px; }
+</style>
+<div class="over">
+    <div class="row">
+        <label>Stamina</label>
+        <input type="range" id="inStamina" value="3" min="0" max="3" step="0.01" >
+    </div>
+</div> -->
+
+</body></html>
