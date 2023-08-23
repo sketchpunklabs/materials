@@ -136,8 +136,8 @@ function customMaterial( props ){
 
         void main(){
             vec2  uv    = fragUV * 2.0 - 1.0;  // Remap 0:1 to -1:1
-            vec3 norm   = normalize( fragNorm );
-            outColor    = vec4( norm, 1.0 );
+            // vec3 norm   = normalize( fragNorm );
+            // outColor    = vec4( norm, 1.0 );
 
             float mask  = 0.0;
             float radOffset = radians( 90.0 );

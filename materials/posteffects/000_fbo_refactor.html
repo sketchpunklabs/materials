@@ -49,7 +49,8 @@ function customMaterial( tex, depth ){
 
         void main(){            
             fragUV      = uv;
-            gl_Position = projectionMatrix * viewMatrix * vec4( position, 0.0, 1.0 );
+            // gl_Position = projectionMatrix * viewMatrix * vec4( position, 0.0, 1.0 );
+            gl_Position = vec4( position, 0.0, 1.0 );
         }`,
 
         fragmentShader  : `#version 300 es
