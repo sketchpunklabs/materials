@@ -1,0 +1,141 @@
+<!DOCTYPE html><html lang="en"><head><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script src="../../../import-map.js"></script><script type="module">
+
+import useThreeWebGL2, { THREE, useDarkScene, useVisualDebug } from '../../lib/useThreeWebGL2.js';
+
+let App   = useDarkScene( useThreeWebGL2() );
+let Debug = {};
+
+window.addEventListener( 'load', async ()=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App.sphericalLook( 0, 30, 5, [0,0,0] );
+    Debug = useVisualDebug( App );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const size = 2;
+    const cell = 1;
+    const bGeo = new THREE.PlaneGeometry( size, size, cell, cell );
+    bGeo.rotateX( Math.PI * -0.5 );
+
+    const iGeo = new THREE.InstancedBufferGeometry();
+    iGeo.instanceCount  = 16;
+    iGeo.index          = bGeo.index;
+    for( const [k,v] of Object.entries( bGeo.attributes ) ) iGeo.setAttribute( k, v );
+
+    const mat  = customMaterial( iGeo.instanceCount, 0.5 );
+    const mesh = new THREE.Mesh( iGeo, mat );
+
+    App.scene.add( mesh );
+
+    // const mat  = new THREE.MeshBasicMaterial( {wireframe:true} );
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.renderLoop();
+});
+
+function customMaterial( instCnt=1, stackH=0.5 ){
+    const mat = new THREE.RawShaderMaterial({
+    // depthTest       : true,
+    // side            : THREE.DoubleSide,
+    // transparent     : true, 
+    // forceSinglePass : true,             
+    // alphaToCoverage : true,             
+    // lights          : true,
+    uniforms        : {
+        instCnt     : { type: 'float', value:instCnt },
+        stackHeight : { type: 'float', value:stackH },
+    },
+    
+    vertexShader    : `#version 300 es
+    in vec3 position;
+    in vec3 normal;
+    in vec2 uv;
+    
+    uniform mat4 modelMatrix;
+    uniform mat4 viewMatrix;
+    uniform mat4 projectionMatrix;
+
+    out vec3 fragNorm;
+    out vec3 fragLPos;
+    out vec3 fragWPos;
+    out vec3 fragVPos;
+    out vec2 fragUV;
+
+    uniform float instCnt;
+    uniform float stackHeight;
+    out float instGrad;
+
+    /////////////////////////////////////////////////////////////////
+
+    void main(){
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        vec3 pos     = position;
+        instGrad     = float( gl_InstanceID ) / instCnt;
+        pos.y       += instGrad * stackHeight;
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        vec4 wPos   = modelMatrix * vec4( pos, 1.0 );
+        vec4 vPos   = viewMatrix * wPos;
+        fragLPos    = position;
+        fragWPos    = wPos.xyz;
+        fragVPos    = vPos.xyz;
+        fragNorm    = normal;
+        fragUV      = uv;
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        gl_Position = projectionMatrix * vPos;
+    }`,
+	
+    fragmentShader  : `#version 300 es
+    precision mediump float;
+
+    in vec3  fragNorm;
+    in vec3  fragLPos;
+    in vec3  fragWPos;
+    in vec3  fragVPos;
+    in vec2  fragUV;
+
+    in float instGrad;
+
+    out vec4  outColor;
+
+    ////////////////////////////////////////////////////////////////////////
+
+    // https://github.com/tuxalin/procedural-tileable-shaders/blob/master/hash.glsl
+    float hash( uint n ){
+        // integer hash copied from Hugo Elias
+        n = ( n << 13u ) ^ n;
+        n = n * ( n * n * 15731u + 789221u ) + 1376312589u;
+        return float( n & uint( 0x7fffffffU ) ) / float( 0x7fffffff );
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+
+    void main(){
+        outColor = vec4( 0.0, 0.0, 0.0, 1.0 );
+
+        float density = 20.0;
+        uvec2 freq    = uvec2( fragUV * density );
+        uint seed     = freq.x + freq.y * uint( density );
+
+        // outColor.rgb  = vec3( hash( seed ) );
+
+        float fHash   = hash( seed );
+        if( fHash >= instGrad ){
+            outColor.rgb = vec3( 0.0, 1.0, 0.0 ) * instGrad;
+        }else{
+            discard;
+        }
+
+        // outColor.rgb  = vec3( step( 0.0, hash( seed ) ) );
+    }`
+    });
+
+    // Object.defineProperty( mat, 'baseColor', { 
+    //     set: ( v )=>{ mat.uniforms.baseColor.value.set( v ); } 
+    // });
+
+    return mat;
+}
+
+</script></body></html>
