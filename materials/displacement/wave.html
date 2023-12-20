@@ -1,0 +1,179 @@
+<!DOCTYPE html><html lang="en"><head><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script src="../../../import-map.js"></script><script type="module">
+
+import useThreeWebGL2, { THREE, useDarkScene } from '../../lib/useThreeWebGL2.js';
+import ShapePointsMesh     	from '../../lib/meshes/ShapePointsMesh.js';
+import DynLinesMesh        	from '../../lib/meshes/DynLineMesh.js';
+
+import GridAlternative      from '../../lib/meshes/GridAlternative.js';
+import ShaderLib            from '../../lib/shaders/ShaderLib.js';
+
+let App   = useDarkScene( useThreeWebGL2() );
+let Debug = {};
+
+window.addEventListener( 'load', async ()=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App.sphericalLook( 0, 30, 5, [0,0,0] );
+
+	App.scene.add( (Debug.pnt = new ShapePointsMesh() ) );
+    App.scene.add( (Debug.ln  = new DynLinesMesh() ) );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const size = 2;
+    const cell = 20;
+    const bGeo = new THREE.PlaneBufferGeometry( size, size, cell, cell );
+    bGeo.rotateX( Math.PI * 0.5 );
+
+    const mat  = await CustomMaterial(); // new THREE.MeshBasicMaterial( {wireframe:true} )
+    const mesh = new THREE.Mesh( bGeo, mat );
+    mesh.position.y = 0.05;
+
+    // const mat  = new THREE.LineBasicMaterial({ color:0xffffff, opacity:0.6, transparent:true });
+    // const wGeo = new THREE.WireframeGeometry( bGeo );
+    // new THREE.LineSegments( wGeo, mat ) 
+    
+    // const mesh = GridAlternative.mesh( mat, 2, 2, 120, 120, false, false );
+    // mesh.position.y = 0.01;
+
+    App.scene.add( mesh );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.renderLoop();
+});
+
+async function CustomMaterial( baseColor=0xa0a0a0 ){
+    return new THREE.RawShaderMaterial({
+    depthTest       : true,
+    transparent 	: false,
+	side			: THREE.DoubleSide,
+    uniforms        : { },
+    
+    vertexShader    : await ShaderLib.Async(`#version 300 es
+    in vec3 position;
+    in vec3 normal;
+    in vec2 uv;
+    
+    uniform mat4 modelMatrix;
+    uniform mat4 viewMatrix;
+    uniform mat4 projectionMatrix;
+
+    out vec3 fragNorm;
+    out vec3 fragWPos;
+    out vec3 fragLPos;
+    out vec2 fragUV;
+   
+    // float valRamp[8] = float[]( 0.0, 0.483, 0.5, 0.579, 1.0, 1.0, 1.0, 1.0 );
+    // float wgtRamp[8] = float[]( 0.0, 0.433, 0.513, 0.594, 1.0, 1.0, 1.0, 1.0 );
+    // include Misc.Ramps.floatLinearRamp
+
+    /////////////////////////////////////////////////////////////////
+
+    #include Blender.CommonHash
+    #include Blender.Noise
+    #include Blender.FractalNoise
+    #include Blender.NoiseTexture
+    #include Blender.Mix.LinearLight
+    #include Blender.MapRange.FLinear
+    #include Blender.VectorRotate.AroundAxis
+    #include Blender.VectorRotate.YAxis
+    #include Blender.VectorRotate.ZAxis
+
+    /*
+    // https://x.com/italiano_jpg/status/1707803735416529231?s=20
+    vec4 displace( vec3 p ){
+        vec3 q = p;
+        float ld = 2.0;
+        float off = -q.z * 1.25 * ( ld / 4.0 );
+        float t  = mod( uTime + off, ld ) / td;
+        float u = t * PI * 2.0;
+
+        q.y += sin( u + 2.0 - cos( u+0.5 ) * 0.5 ) * 0.6;
+        q.z += cos( u ) * 0.6;
+
+        return vec4( q  , t );
+    }
+    */
+
+    /////////////////////////////////////////////////////////////////
+
+    void main(){
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // DISPLACEMENT
+        vec3 pos    = position;
+
+        vec4  aNC   = vec4( 0.0 );
+        float bN    = 0.0; 
+        node_noise_texture_3d( vec3( uv, 0.0 ), 1.0, 5.9, 2.17, 0.735, 0.0, bN, aNC );
+
+        vec4 llN = node_mix_linear( 0.146, vec4( uv, 0.0, 0.0 ), aNC );
+        // pos.y = llN.x;
+
+        vec4  bNC   = vec4( 0.0 ); // Not needed
+        node_noise_texture_3d( vec3( uv.y ), 1.0, 1.91, 2.0, 0.5, 0.0, bN, bNC );
+        bN *= 0.590;
+
+        float mN = llN.x - bN;
+
+        // pos.y = mN;
+
+        float waveFactor = 1.0 * -6.283;
+        float time       = 25.0;
+        float mTime      = time * 0.073;
+        float sine       = sin( mN * waveFactor + mTime );
+
+        // pos.y = sine;
+
+        vec3 offset = vec3( sine );
+        offset    *= vec3( 0.69, 0.67, 0.0 );
+        offset    *= map_range_linear( uv.x, 0.0, 1.0, 0.7, 0.73 );
+        offset.xz += ( uv - 0.5 ) * vec2( 1.0, 2.5 );
+        // offset     = rotate_around_axis( offset, vec3(0.0, 1.0, 0.0 ), sine * -0.4 );
+        offset     = rotate_around_axis( offset, vec3(0.0, 0.0, 1.0 ), sine * -0.4 );
+        pos       += offset;
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        vec4 wPos   = modelMatrix * vec4( pos, 1.0 );
+        fragWPos    = wPos.xyz;
+        fragLPos    = position;
+        fragNorm    = normal;
+        fragUV      = uv;
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        gl_Position = projectionMatrix * viewMatrix * wPos;
+    }`),
+	
+    fragmentShader  : await ShaderLib.Async(`#version 300 es
+    precision mediump float;
+
+    in vec3  fragNorm;
+    in vec3  fragWPos;
+    in vec3  fragLPos;
+    in vec2  fragUV;
+
+    out vec4  outColor;
+
+    ////////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////////
+
+    vec3 lightPos = vec3( 1.0, 5.0, 1.0 );
+
+    void main(){
+        // Base color using noise from vertex shader
+        outColor = vec4( vec3( 0.5 ), 1.0 );
+
+        // Create normals using derivitive functions. Makes things look low poly
+        // But since I currently can't compute NORMALS from noise displacement
+        // this will have to do for now.
+        vec3 norm = normalize( cross( dFdx( fragWPos), dFdy( fragWPos ) ) );
+
+        // Do some very basic lighting
+        float diffuse = dot( norm, normalize( lightPos - fragWPos ) );
+        outColor.rgb *= clamp( 0.2, 1.0, diffuse );
+    }`)
+
+    });
+}
+
+</script></body></html>

@@ -1,0 +1,26 @@
+https://github.com/Tetane/shell_texturing_grass
+https://twitter.com/Tetane004/status/1719772309001589010?s=20
+
+https://www.youtube.com/watch?v=9dr-tRQzij4
+https://github.com/GarrettGunnell/Shell-Texturing
+
+https://github.com/robert-leitl/boris
+https://robert-leitl.github.io/boris/dist/?debug=true
+https://twitter.com/leitl_robert/status/1724421238154494432?s=20
+
+- https://www.shadertoy.com/view/4ssXRX Several Noise Distributions
+-- https://www.shadertoy.com/view/4t2SDh Faster?
+- https://www.shadertoy.com/view/ltB3zD Uniform Golden Ratio Noise
+- https://www.shadertoy.com/view/MlfXzN interesting random "Matrix code"
+
+- Compute Hash from UV coordinates * density
+- Each level will run the same hash but filter at different limits
+-- else discard
+- Color pixel with color * height^attenuation
+
+
+// tosphere box
+var geometry = new THREE.BoxGeometry( 1, 1, 1, 6, 6, 6 )
+for ( var i = 0, l = geometry.vertices.length; i < l; i ++ ) {
+    geometry.vertices[ i ].normalize().multiplyScalar( 1 );
+}

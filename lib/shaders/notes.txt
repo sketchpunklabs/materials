@@ -5,3 +5,5 @@ code to compute normal maps from height maps from unity
 https://github.com/Fubaxiusz/fubax-shaders/blob/master/Shaders/TiltShift.fx#L100
 Tilt Shift
 
+https://godotshaders.com/snippet/fresnel/
+Really cool Glowing Fresnel

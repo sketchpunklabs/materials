@@ -35,3 +35,57 @@ rayDirection = normalize(rayDirection);
     //     UV = frac(sin(mul(UV, m)) * 46839.32);
     //     return float2(sin(UV.y*+offset)*0.5+0.5, cos(UV.x*offset)*0.5+0.5);
     // }
+
+
+https://godotshaders.com/snippet/fractal-brownian-motion-fbm/
+https://godotshaders.com/snippet/seamless-perlin-noise/
+https://godotshaders.com/snippet/polygons/
+https://godotshaders.com/snippet/squares/
+https://godotshaders.com/snippet/swirl/
+
+https://godotshaders.com/shader/sokpop-skybox/
+https://godotshaders.com/shader/stylized-sky-with-procedural-sun-and-moon/
+https://godotshaders.com/shader/panoramic-textured-sky-with-clouds/
+https://godotshaders.com/shader/stylized-sky-shader-with-clouds/
+https://godotshaders.com/shader/stylized-sky-with-procedural-sun-and-moon/
+
+https://godotshaders.com/shader/moving-gradient-noise-fog-mist-for-godot-4/
+
+https://godotshaders.com/snippet/polar-coordinates/
+vec2 polar_coordinates(vec2 uv, vec2 center, float zoom, float repeat)
+{
+	vec2 dir = uv - center;
+	float radius = length(dir) * 2.0;
+	float angle = atan(dir.y, dir.x) * 1.0/(3.1416 * 2.0);
+	return mod(vec2(radius * zoom, angle * repeat), 1.0);
+}
+
+void fragment(){
+	vec2 polar_uv = polar_coordinates(UV.xy, vec2(0.5), 0.3, 1.0);
+	COLOR = texture(TEXTURE, polar_uv);
+}
+
+// https://www.shadertoy.com/view/dsGBzW
+mat3 TBN(vec3 N) {
+    //Returns the simple tangent space matrix
+    vec3 Nb,Nt;
+    if (abs(N.y)>0.999) {
+        Nb = vec3(1.,0.,0.);
+        Nt = vec3(0.,0.,1.);
+    } else {
+    	Nb = normalize(cross(N,vec3(0.,1.,0.)));
+    	Nt = normalize(cross(Nb,N));
+    }
+    return mat3(Nb.x,Nt.x,N.x,Nb.y,Nt.y,N.y,Nb.z,Nt.z,N.z);
+}
+
+vec3 TBN(vec3 N, out vec3 O) {
+    //Returns the simple tangent space directions
+    if (abs(N.y)>0.999) {
+        O = vec3(1.,0.,0.);
+        return vec3(0.,0.,1.);
+    } else {
+        O = normalize(cross(N,vec3(0.,1.,0.)));
+        return normalize(cross(O,N));
+    }
+}

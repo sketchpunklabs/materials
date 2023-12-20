@@ -41,6 +41,7 @@ function onPostRender( dt, et ){
 
 function customMaterial( tex, depth ){
     const mat = new THREE.RawShaderMaterial({
+        // glslVersion     : THREE.GLSL3,
         name            : 'PostMaterial',
         depthTest       : true,
         transparent 	: false,

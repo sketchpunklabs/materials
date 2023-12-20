@@ -1,0 +1,270 @@
+<!DOCTYPE html><html lang="en"><head><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script src="../../import-map.js"></script><script type="module">
+// #region IMPORTS
+import useThreeWebGL2, { useDarkScene, THREE } from '../../lib/useThreeWebGL2.js';
+import ShaderLib    from '../../lib/shaders/ShaderLib.js';
+// #endregion
+
+// #region MAIN
+let App   = useDarkScene( useThreeWebGL2() );
+let Debug = {};
+let Ref   = {};
+
+window.addEventListener( 'load', async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.sphericalLook( 0, 0, 6, [0,1.0,0] );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const mat  = await customMaterial();
+    const geo  = new THREE.BoxGeometry( 2, 2, 2 );
+    const mesh = new THREE.Mesh( geo, mat );
+    mesh.position.y = 1.0;
+    mesh.renderOrder = 1000;
+    App.scene.add( mesh );
+
+    const m    = new THREE.Mesh( geo, new THREE.MeshPhongMaterial( {color:0xffffff} ) );
+    m.scale.setScalar( 0.25 );
+    m.position.set( 0.0, 0.25, 0.0 );
+    App.scene.add( m );
+    // App.scene.add( Plane( { 
+    //     w:1, h:1, 
+    //     pos:[0,0.5,0], 
+    //     mat: customMaterial()
+    // } ) );
+
+    Ref.mat = mat;
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // App.renderLoop();
+    App.createRenderLoop( onPreRender ).start();
+});
+
+function onPreRender( dt, et ){
+    Ref.mat.time = et;
+}
+// #endregion
+
+/*
+https://x.com/lateasusual_/status/1624588143511932930
+https://twitter.com/lateasusual_/status/1624590070102609920
+https://pbs.twimg.com/media/Fou0BdFXwAAzRvN?format=jpg&name=4096x4096
+https://iquilezles.org/articles/fog/
+
+b = density
+vec3 applyFog( in vec3  rgb,      // original color of the pixel
+               in float distance, // camera to point distance
+               in vec3  rayOri,   // camera position
+               in vec3  rayDir )  // camera to point vector
+{
+    float fogAmount = (a/b) * exp(-rayOri.y*b) * (1.0-exp( -distance*rayDir.y*b ))/rayDir.y;
+    vec3  fogColor  = vec3(0.5,0.6,0.7);
+    return mix( rgb, fogColor, fogAmount );
+}
+*/
+
+async function customMaterial(){
+    const mat = new THREE.RawShaderMaterial({
+        name            : 'VolumeFog',
+        depthTest       : true,
+        transparent 	: true,
+        // alphaToCoverage : true,
+        // side            : THREE.DoubleSide, // THREE.BackSide,
+        // blending        : THREE.AdditiveBlending,
+        uniforms        : { 
+            // tex01 : { type :'sampler2D', value: tex01 },    // Normal Map
+            time : { type :'float', value: 0 },    // Normal Map
+        },
+    
+        vertexShader    : `#version 300 es
+        in vec3 position;
+        in vec3 normal;
+		in vec2 uv;
+
+        uniform highp mat4 modelMatrix;
+        uniform mat4 viewMatrix;
+        uniform mat4 projectionMatrix;
+
+        out vec2 fragUV;
+        out vec3 fragLPos;
+        out vec3 fragWPos;
+        out vec3 fragWNorm;
+
+        void main(){            
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            vec4 wPos 	= modelMatrix * vec4( position, 1.0 );  // World Space
+            vec4 vPos   = viewMatrix * wPos;                    // View Space
+            
+            gl_Position = projectionMatrix * vPos;
+            
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            fragUV      = uv;
+            fragWPos    = wPos.xyz;
+            fragWNorm   = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+            fragLPos    = position;
+        }`,
+
+        fragmentShader  : await ShaderLib.Async(`#version 300 es
+        precision mediump float;
+        
+        uniform highp mat4 modelMatrix;
+        uniform vec3 cameraPosition;
+        uniform float time;
+
+        in vec2 fragUV;
+        in vec3 fragLPos;
+        in vec3 fragWPos;
+        in vec3 fragWNorm;
+
+        out vec4 outColor;
+
+        // #####################################################
+
+        #include Blender.CommonHash
+        #include Blender.Noise
+        #include Blender.FractalNoise
+        #include Blender.NoiseTexture
+        #include Blender.MathF.SmoothMin
+        #include Blender.MapRange.FLinear
+        #include Blender.MapRange.FSmoothStep
+
+        // #####################################################
+
+        float fogAmount(
+                float distance, // camera to point distance
+                vec3  rayOri,   // camera position
+                vec3  rayDir,   // camera to point vector
+                float density,
+                float a
+        ){
+        // return ( a / density ) 
+        //     * exp( -rayOri.y * density ) 
+        //     * ( 1.0 -exp( -distance * rayDir.y * density ) )
+        //     / rayDir.y;
+
+        return ( a / density ) 
+            * exp( -rayOri.y * density ) 
+            * ( 1.0 - exp( -distance * rayDir.y * density ) )
+            / rayDir.y;
+        }
+
+        float applyFog( float distance, float b ){ // camera to point distance
+            return 1.0 - exp( -distance*b );
+        }
+
+        vec2 intersectAABB( vec3 rOrigin, vec3 rDir, vec3 bMin, vec3 bMax ){
+            vec3 tMin = ( bMin - rOrigin ) / rDir;
+            vec3 tMax = ( bMax - rOrigin ) / rDir;
+
+            vec3 t1     = min( tMin, tMax );
+            vec3 t2     = max( tMin, tMax );
+            float tNear = max( max( t1.x, t1.y ), t1.z );
+            float tFar  = min( min( t2.x, t2.y ), t2.z );
+
+            return ( tNear < tFar )? vec2( tNear, tFar ) : vec2( 0.0, 0.0 );
+        }
+
+        // #####################################################
+
+        void main(){
+            outColor = vec4( 1.0, 0.0, 0.0, 0.9 );
+
+
+
+            // fog = math_smoothmin( fog, 1.21, 0.2 );
+            // fog = pow( abs( fog ), 2.0 ) * sign( fog );
+
+
+            // float y = normalize( vec3(0.0, 1.0, 0.0) - cameraPosition ).y;
+            // // float y = rayDir.y;
+            // float b = 4.21;
+            // float AA = 1.1 - exp( ((( 0.5 / 13.1 ) * y) * b) * -5.0  ); // OK
+
+            // vec3 modelPos = fragLPos; //vec3( 0.0, 0.5, 0.0 );
+            // float BB = map_range_smootherstep( modelPos.y, -1.0, 1.0, 0.0, 1.0 ); // Good
+            // float CC = exp( BB * -1.0 * b ); // Good
+            // float DD = map_range_linear( pow( rayDir.y, 1.0 ), 0.0, 1.0, 1.0, 2.0 );  // / b;
+            // DD = 1.0 - DD / b; // Goodish
+
+            // float EE = math_smoothmin( ( ( DD * CC ) * AA ) / y, 1.21, 0.2 ); // D*C good, not so much with A
+            // float FOG = pow( abs( EE ), 1.0 ) * sign( EE );
+
+            // outColor.rgb = vec3( FOG ); 
+            
+            
+            /* 
+            const n = maprange( ns, 0.2, 0.74, 0.05, 1.0 )
+            n = pow( x, 2.0 );
+
+            fog  = SmoothMin( fogAmount, 1.21, 0.2 );
+            fog = pow( abs( fog ), 2.0 ) * sign( fog );
+
+            alpha = n * fog;
+            */
+
+            vec3 boundMin = vec3( -1.0, -1.0, -1.0 );
+            vec3 boundMax = vec3( 1.0, 1.0, 1.0 );
+            float yMask = map_range_linear( fragLPos.y, boundMin.y, boundMax.y, 0.0, 1.0 );
+            yMask = 1.0 - smoothstep( 0.0, 0.5, yMask );
+
+            outColor.rgb = vec3( yMask );
+
+            float x = smoothstep( 0.90, 1.0, abs( fragLPos.x ) );
+            float z = smoothstep( 0.90, 1.0, abs( fragLPos.z ) );
+            float xzMask = 1.0 - max( x, z );
+            outColor.rgb = vec3( xzMask );
+            // outColor.rgb = vec3( xzMask * yMask );
+
+            
+            float densityB = 4.0;
+            float densityA = 0.5;
+            vec3 rayDir   = normalize( fragWPos - cameraPosition );
+            float rayDist = length( fragWPos - cameraPosition );
+            float fog     = fogAmount( rayDist, cameraPosition, rayDir, densityB, densityA );
+            // fog  = applyFog( rayDist, densityB );
+
+            outColor.rgb = vec3( fog );
+
+            vec4  aNC     = vec4( 0.0 );
+            float bN      = 0.0; 
+            vec3 time     = vec3( 0.0, -time*0.2, 0.0);
+
+            node_noise_texture_3d( fragLPos + time, 1.0, 1.5, 2.0, 0.5, 0.0, bN, aNC );
+            bN = map_range_linear( bN, 0.2, 0.74, 0.05, 1.0 );
+            bN = pow( bN, 2.0 );
+
+            // outColor = vec4( bN   );
+            // outColor = vec4( bN * yMask );
+            // outColor.rgb *= vec3( 0.0, 1.0, 1.0 );
+
+            // outColor.a   = 1.0; 
+
+
+            rayDir      = normalize( fragWPos - cameraPosition );
+            mat4 iModelMatrix = inverse( modelMatrix );
+            vec3 lPos   = (iModelMatrix * vec4(fragWPos,1.0)).xyz;
+            vec3 ray    = (iModelMatrix * vec4(rayDir,0.0)).xyz;
+            vec2 hit    = intersectAABB( lPos, ray, boundMin, boundMax );
+            vec3 hitPos = ( ray * hit.y ) + lPos;
+
+            vec3 hp     = (modelMatrix * vec4(hitPos,1.0)).xyz;
+
+            outColor.rgb = vec3( length( hitPos - lPos ) );
+            outColor.a   = 1.0;
+
+            float dest = 4.0;
+            // fog = fogAmount( length( hitPos - lPos ), lPos, ray, dest, dest );
+            fog = fogAmount( length( hp - cameraPosition ), cameraPosition, rayDir, dest, dest );
+            
+            outColor = vec4( fog );
+
+            // smoothstep( yMask, 0.0, 0.5 )
+        }`),
+    });
+
+    Object.defineProperty( mat, 'time', { set( v ){ mat.uniforms.time.value = v; } });
+
+    return mat;
+}
+
+</script></body></html>

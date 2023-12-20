@@ -1,0 +1,53 @@
+https://twitter.com/lateasusual_/status/1624588143511932930
+
+https://github.com/pmndrs/postprocessing/blob/main/src/core/EffectComposer.js
+
+
+https://github.com/pmndrs/postprocessing/blob/main/src/core/EffectComposer.js#LL347C4-L347C4
+const size = (renderer === null) ? new Vector2() : renderer.getDrawingBufferSize(new Vector2());
+const options = {
+    minFilter: LinearFilter,
+    magFilter: LinearFilter,
+    stencilBuffer,
+    depthBuffer,
+    type
+};
+const renderTarget = new WebGLRenderTarget(size.width, size.height, options);
+if(multisampling > 0) {
+    renderTarget.ignoreDepthForMultisampleCopy = false;
+    renderTarget.samples = multisampling;
+}
+
+if(type === UnsignedByteType && getOutputColorSpace(renderer) === SRGBColorSpace) {
+    setTextureColorSpace(renderTarget.texture, SRGBColorSpace);
+}
+renderTarget.texture.name = "EffectComposer.Buffer";
+renderTarget.texture.generateMipmaps = false;
+
+
+function getFullscreenTriangle() {
+
+	if(geometry === null) {
+
+		const vertices = new Float32Array([-1, -1, 0, 3, -1, 0, -1, 3, 0]);
+		const uvs = new Float32Array([0, 0, 2, 0, 0, 2]);
+		geometry = new BufferGeometry();
+
+		// Added for backward compatibility (setAttribute was added in three r110).
+		if(geometry.setAttribute !== undefined) {
+
+			geometry.setAttribute("position", new BufferAttribute(vertices, 3));
+			geometry.setAttribute("uv", new BufferAttribute(uvs, 2));
+
+		} else {
+
+			geometry.addAttribute("position", new BufferAttribute(vertices, 3));
+			geometry.addAttribute("uv", new BufferAttribute(uvs, 2));
+
+		}
+
+	}
+
+	return geometry;
+
+}
