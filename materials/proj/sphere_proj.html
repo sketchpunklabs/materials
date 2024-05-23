@@ -1,0 +1,207 @@
+<!DOCTYPE html><html lang="en"><head><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script src="../../import-map.js"></script><script type="module">
+import useThreeWebGL2, { useDarkScene, THREE } from '../../lib/useThreeWebGL2.js';
+
+let App   = useDarkScene( useThreeWebGL2() );
+let Ref   = {};
+
+window.addEventListener( 'load', async _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.sphericalLook( 0, 20, 1.5, [0,0.5,0]);
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const tex  = new THREE.TextureLoader().load( '../../assets/imgs/textures/UVbw.png' );
+    tex.wrapS = THREE.RepeatWrapping; // THREE.ClampToEdgeWrapping
+    tex.wrapT = THREE.RepeatWrapping; // THREE.ClampToEdgeWrapping
+    // tex.flipY  = true;
+
+    const mat  = customMaterial( tex );
+    Ref.mat    = mat;
+    
+    const geo  = new THREE.PlaneGeometry( 1, 1 );
+    const mesh = new THREE.Mesh( geo, mat );
+    mesh.position.y = 0.5;
+    App.scene.add( mesh );
+    
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.renderLoop();
+    setupUI();
+});
+
+function elm( id ){ return document.getElementById( id ) }
+function onIn( el, fn ){ el.addEventListener( 'input', fn ); }
+function setupUI(){
+    onIn( elm( 'inScalar' ), e=>{ Ref.mat.scalar = parseFloat( e.target.value ); } );
+    onIn( elm( 'inBGMask' ), e=>{ Ref.mat.bgmask = parseFloat( e.target.value ); } );
+
+    onIn( elm( 'inXoffset' ), e=>{ Ref.mat.xoffset = parseFloat( e.target.value ); } );
+    onIn( elm( 'inYoffset' ), e=>{ Ref.mat.yoffset = parseFloat( e.target.value ); } );
+}
+
+// BLENDER-NODES EXAMPLE : https://x.com/cmzw_/status/1616708959506948096?s=20
+
+function customMaterial( tex ){
+    // #region PROPS
+    // props = Object.assign( {
+        // baseColor : 0x00ffff,
+        // tex       : null,
+    // }, props );
+    // #endregion
+
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        side            : THREE.DoubleSide,
+        transparent     : true, 
+        // forceSinglePass : true,             
+        // alphaToCoverage : true,             
+        // lights          : true,
+
+        uniforms        : {
+            // baseColor : { type :'vec3', value: new THREE.Color( props.baseColor ) },
+            scalar  : { type :'float', value: 0.2 },
+            bgmask  : { type :'float', value: 0.0 },
+            xoffset : { type :'float', value: 0.0 },
+            yoffset : { type :'float', value: 0.0 },
+            tex     : { type :'sampler2D', value: tex },
+        },
+
+        extensions      : { derivatives : true },
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        // ################################################################
+
+        void main(){
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            vec3 pos = position;
+            
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            vec4 wPos 	        = modelMatrix * vec4( pos, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;               // View Space
+            
+            fragUV              = uv;
+            fragWPos            = wPos.xyz;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position			= projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+
+        in  vec3    fragWPos;
+        in  vec3    fragNorm;
+        in  vec2    fragUV;
+        out vec4    outColor;
+
+        uniform sampler2D tex;
+        uniform float scalar;
+        uniform float bgmask;
+        uniform float xoffset;
+        uniform float yoffset;
+
+        // ################################################################
+
+        void main(){
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            outColor = vec4( 0.0, 0.0, 0.0, 1.0 );
+            vec2 uv = ( fragUV - 0.5 ) * 2.0; // Remap 0:1 to -1:1
+
+            // outColor = texture( tex, fragUV );
+            // outColor.rgb = vec3( length( uv ) );
+            // outColor.rgb = vec3( dot( uv, uv ) );
+            // outColor.rgb = vec3( 0.5 - dot( uv, uv ) );
+            // outColor.rgb = vec3( clamp( 0.0, 1.0, 0.5 - dot( uv, uv ) ) );
+            // outColor.rgb = vec3( sqrt( 0.5 - dot( uv, uv ) ) );
+            // outColor.rgb = vec3( sqrt( clamp( 0.0, 1.0, 0.5 - dot( uv, uv ) ) ) );
+            
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            float dist = 0.5 - dot( uv, uv );
+
+            // https://github.com/blender/blender/blob/b61496c5089260a5a35ed4863685ef072e7c5e79/source/blender/gpu/shaders/common/gpu_shader_common_math.glsl#L48
+            dist = ( dist > 0.0 )? sqrt( dist ) : 0.0; // prevent nan when sqrt( <= 0 )
+            
+            float scl = scalar / ( dist + 0.5 );
+            vec2 sUV  = uv * scl + vec2( xoffset, yoffset ); 
+            outColor = texture( tex, sUV );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Mask the sphere
+            // outColor.rgb *= dist;  // Nice Gradient
+            // outColor.rgb *= smoothstep( 0.0, 0.1, dist ); // Crisp
+
+            outColor.rgb = mix( outColor.rgb, outColor.rgb * dist, bgmask );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // if( dist < 0.5 ) outColor.rgb = vec3( 1.0, 0.0, 0.0 );
+            // if( isinf( dist ) ) outColor.rgb = vec3( 0.0, 1.0, 0.0 );
+            // if( isnan( dist ) ) outColor.rgb = vec3( 0.0, 0.0, 1.0 );
+        }`
+    });
+
+    // Object.defineProperty( mat, 'baseColor', { 
+    //     set: ( v )=>{ mat.uniforms.baseColor.value.set( v ); } 
+    // });
+
+    Object.defineProperty( mat, 'scalar', { 
+        set: ( v )=>{ mat.uniforms.scalar.value = v; } 
+    });
+
+    Object.defineProperty( mat, 'bgmask', { 
+        set: ( v )=>{ mat.uniforms.bgmask.value = v; } 
+    });
+
+    Object.defineProperty( mat, 'xoffset', { 
+        set: ( v )=>{ mat.uniforms.xoffset.value = v; } 
+    });
+    
+    Object.defineProperty( mat, 'yoffset', { 
+        set: ( v )=>{ mat.uniforms.yoffset.value = v; } 
+    });
+    return mat;
+}
+
+</script>
+
+<style>
+    *{ font-family: monospace; font-size:14px; }
+    .over{ position:fixed; bottom:10px; left:10px; width:300px; }
+
+    .row{ display:flex; flex-direction:row; color:white; align-items: center; }
+    .row > label{ flex:0 0 100px; }
+    .row > input{ flex:1 1 auto; }
+</style>
+<div class="over">
+    <div class="row">
+        <label>Scalar</label>
+        <input type="range" id="inScalar" value="0.2" min="0.01" max="1.0" step="0.01" >
+    </div>
+
+    <div class="row">
+        <label>BGMask</label>
+        <input type="range" id="inBGMask" value="0.0" min="0.1" max="1.0" step="0.01" >
+    </div>
+
+    <div class="row">
+        <label>XOffset</label>
+        <input type="range" id="inXoffset" value="0.0" min="-1.0" max="1.0" step="0.001" >
+    </div>
+
+    <div class="row">
+        <label>YOffset</label>
+        <input type="range" id="inYoffset" value="0.0" min="-1.0" max="1.0" step="0.001" >
+    </div>
+</div>
+
+</body></html>
