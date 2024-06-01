@@ -1,0 +1,324 @@
+<!DOCTYPE html><html lang="en"><head><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script src="../../import-map.js"></script><script type="module">
+import useThreeWebGL2, { useDarkScene, THREE } from '../../lib/useThreeWebGL2.js';
+
+let App   = useDarkScene( useThreeWebGL2() );
+let Ref   = {};
+
+window.addEventListener( 'load', async _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.sphericalLook( 0, 20, 1.5, [0,0.5,0]);
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const tex = new THREE.TextureLoader().load( '../../assets/imgs/textures/UVbw.png' );
+    tex.wrapS = THREE.RepeatWrapping; // THREE.ClampToEdgeWrapping
+    tex.wrapT = THREE.RepeatWrapping; // THREE.ClampToEdgeWrapping
+    // tex.flipY  = true;
+
+    const mat  = customMaterial( tex );
+    Ref.mat    = mat;
+    
+    const geo  = new THREE.PlaneGeometry( 1, 1 );
+    const mesh = new THREE.Mesh( geo, mat );
+    mesh.position.y = 0.5;
+    App.scene.add( mesh );
+    
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.renderLoop();
+    setupUI();
+});
+
+// #region UI
+function elm( id ){ return document.getElementById( id ) }
+function onIn( el, fn ){ el.addEventListener( 'input', fn ); }
+function setupUI(){
+    onIn( elm( 'xRot' ), e=>{ Ref.mat.xRot = parseFloat( e.target.value ); } );
+    onIn( elm( 'yRot' ), e=>{ Ref.mat.yRot = parseFloat( e.target.value ); } );
+    onIn( elm( 'zRot' ), e=>{ Ref.mat.zRot = parseFloat( e.target.value ); } );    
+    onIn( elm( 'scale' ), e=>{ Ref.mat.scale = parseFloat( e.target.value ); } );
+    onIn( elm( 'pscale' ), e=>{ Ref.mat.pscale = parseFloat( e.target.value ); } );
+    onIn( elm( 'pclip' ), e=>{ Ref.mat.pclip = parseFloat( e.target.value ); } );
+    onIn( elm( 'ponly' ), e=>{ Ref.mat.ponly = parseFloat( e.target.value ); } );
+}
+// #endregion
+
+// #region SHADER
+// MAIN  : https://emildziewanowski.com/flat-planets/
+// EXTRA : https://emildziewanowski.com/flowfields/
+
+function customMaterial( tex ){
+    // #region PROPS
+    // props = Object.assign( {
+        // baseColor : 0x00ffff,
+        // tex       : null,
+    // }, props );
+    // #endregion
+
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        side            : THREE.DoubleSide,
+        transparent     : true, 
+        // forceSinglePass : true,             
+        // alphaToCoverage : true,             
+        // lights          : true,
+
+        uniforms        : {
+            // baseColor : { type :'vec3', value: new THREE.Color( props.baseColor ) },
+            tex     : { type :'sampler2D', value: tex },
+            xRot    : { type :'float', value: 0.0 },
+            yRot    : { type :'float', value: 0.0 },
+            zRot    : { type :'float', value: 0.0 },
+            scale   : { type :'float', value: 1.0 },
+
+            pscale  : { type :'float', value: 0.4 },
+            pclip   : { type :'float', value: 0.75 },
+
+            ponly   : { type :'float', value: 0.0 },
+        },
+
+        extensions      : { derivatives : true },
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragLPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        // ################################################################
+
+        void main(){
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            vec3 pos = position;
+            
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            vec4 wPos 	        = modelMatrix * vec4( pos, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;               // View Space
+            
+            fragUV              = uv;
+            fragWPos            = wPos.xyz;
+            fragLPos            = position;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position			= projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+
+        in  vec3    fragWPos;
+        in  vec3    fragLPos;
+        in  vec3    fragNorm;
+        in  vec2    fragUV;
+        out vec4    outColor;
+
+        uniform sampler2D tex;
+        uniform float xRot;
+        uniform float yRot;
+        uniform float zRot;
+        uniform float scale;
+        uniform float pscale;
+        uniform float pclip;
+        uniform float ponly;
+
+        // ################################################################
+
+        // #region SPHERICAL
+
+        // UV must be in the range of -1:1
+        vec4 spherePosWithMask( vec2 uv ){
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Compute Circle Mask
+            float sqUVLen  = dot( uv, uv );
+            float mask     = step( sqUVLen, 1.0 );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Compute sphere position from UV & sphere radius
+            // XY = UV * Radius, Z = sqrt( Radius^2 - UVLen^2 )
+            return ( mask > 0.0 )
+                ? vec4( uv, sqrt( 1.0 - sqUVLen ), mask )
+                : vec4( 0.0, 0.0, 0.0, mask );
+        }
+
+
+        // Convert position to warped UV
+        vec2 sphericalPosUV( vec3 pos, float scale ){
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            float x  = sqrt( 1.0 - pos.y * pos.y ); // X at Y
+            float gx = pos.x / x * sign( pos.z );   // Curve X inward from square to arc
+            vec2  xy = vec2( gx, pos.y );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Asin returns -1.57:1.57 with input -1:1, which is range of Half PI
+            // Divide by Pi creates a range of -0.5:0.5
+            // Add 0.5 to remap the final result between 0:1
+            return asin( xy ) / 3.14159 * scale + 0.5;
+        }
+        // #endregion
+
+        // #region ROTATION
+        mat3x3 rotXZ( float rx, float rz ){
+            float cosX = cos( rx );
+            float sinX = sin( rx );
+            float cosZ = cos( rz );
+            float sinZ = sin( rz );
+
+            // xx yx zx
+            // xy yy zy
+            // xz yz zz
+            return mat3x3(
+                cosZ, -sinZ * cosX,  sinZ * sinX,
+                sinZ,  cosZ * cosX, -cosZ * sinX,
+                0.0,   sinX,         cosX
+            );
+        }
+
+        mat3x3 rotYXZ(float rx, float ry, float rz) {
+            // flip sign cause AI couldn't fix the order of operations to make the X rotation correct
+            float cosX = cos(-rx); 
+            float sinX = sin(-rx);
+            float cosY = cos(ry);
+            float sinY = sin(ry);
+            float cosZ = cos(rz);
+            float sinZ = sin(rz);
+            // xx yx zx
+            // xy yy zy
+            // xz yz zz
+            return mat3x3(
+                cosY * cosZ + sinX * sinY * sinZ,   cosX * sinZ,  -sinY * cosZ + cosY * sinX * sinZ,
+               -cosY * sinZ + sinX * sinY * cosZ,   cosX * cosZ,   sinY * sinZ + cosY * sinX * cosZ,
+                cosX * sinY,                       -sinX,          cosX * cosY
+            );
+        }
+
+        mat3x3 rotYX(float rx, float ry) {
+            // flip sign on X cause AI couldn't fix x direction
+            float cosX = cos(-rx); 
+            float sinX = sin(-rx);
+            float cosY = cos(ry);
+            float sinY = sin(ry);
+            // xx yx zx
+            // xy yy zy
+            // xz yz zz
+            return mat3x3(
+                cosY,          0.0,   -sinY,
+                sinX * sinY,   cosX,   sinX * cosY,
+                cosX * sinY,  -sinX,   cosX * cosY
+            );
+        }
+        // #endregion
+
+        // #region UNUSED
+        // Original Function https://www.shadertoy.com/view/4f2XDz
+        // Using 3 axis rotation removes need for spin.
+        // Without spin, we can optimize this op down to pos.xz*scale
+        // vec2 polarUVWithRotation( vec3 pos, float spin ){
+        //     // float cosSpin = 1.0; // cos( spin );
+        //     // float sinSpin = 0.0; // sin( spin );
+        //     float scl = 0.4;
+        //     // vec2 uv = pos.xz * scale; //( vec2(pos.x, pos.z) * scale );
+        //     // return vec2(
+        //     //     uv.x * cosSpin - uv.y * sinSpin,
+        //     //     uv.x * sinSpin + uv.y * cosSpin
+        //     // );
+        //     return pos.xz * scl; // vec2( pos.x * scl, pos.z * scl );
+        // }
+        // #endregion
+
+        void main(){
+            // outColor = vec4( 0.0, 0.0, 0.0, 1.0 );
+            // outColor = texture( tex, fragUV );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Proc flat sphere with uv coordinates
+            vec2 cuv  = ( fragUV - 0.5 ) * 2.0;          // Remap 0:1 to -1:1
+            vec4 cpos = spherePosWithMask( cuv );        // Map UV to Spherical Position, W=CircleMask
+
+            mat3 rot  = rotYXZ( xRot, yRot, zRot );
+            vec3 rpos = rot * cpos.xyz;                  // Rotate sphere position
+            vec2 suv  = sphericalPosUV( rpos, scale );   // Convert rotated point to UV
+            outColor  = texture( tex, suv.xy ) * cpos.w; // Get pixel & apply circle mask
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Compute Pole Patch
+            vec2 puv    = rpos.xz * pscale * cpos.w;    // polarUVWithRotation( rpos * cpos.w, 0.0 );
+            float pmask = step( pclip, abs( rpos.y ) ); // Mask the poles 
+            vec4 pcolor = texture( tex, puv ) * pmask;
+            // outColor    = pcolor;
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Mix Sphere with Pole Patch
+            outColor = mix( outColor, pcolor, max( pmask, ponly ) ); // ponly is for demo use only
+        }`
+    });
+
+    // Object.defineProperty( mat, 'baseColor', { set: ( v )=>{ mat.uniforms.baseColor.value.set( v ); } });
+
+    Object.defineProperty( mat, 'zRot', { set: ( v )=>{ mat.uniforms.zRot.value = v; } });
+    Object.defineProperty( mat, 'yRot', { set: ( v )=>{ mat.uniforms.yRot.value = v; } });
+    Object.defineProperty( mat, 'xRot', { set: ( v )=>{ mat.uniforms.xRot.value = v; } });
+
+    Object.defineProperty( mat, 'scale', { set: ( v )=>{ mat.uniforms.scale.value = v; }  });
+    Object.defineProperty( mat, 'pscale', { set: ( v )=>{ mat.uniforms.pscale.value = v; } });
+    Object.defineProperty( mat, 'pclip', { set: ( v )=>{ mat.uniforms.pclip.value = v; } });
+    Object.defineProperty( mat, 'ponly', { set: ( v )=>{ mat.uniforms.ponly.value = v; } });
+
+    return mat;
+}
+// #endregion
+
+</script>
+<!-- #region UI -->
+<style>
+    *{ font-family: monospace; font-size:14px; }
+    .over{ position:fixed; bottom:10px; left:10px; width:350px; }
+
+    .row{ display:flex; flex-direction:row; color:white; align-items: center; }
+    .row > label{ flex:0 0 90px; }
+    .row > input{ flex:1 1 auto; }
+</style>
+<div class="over">
+    <div class="row">
+        <label>xRot</label>
+        <input type="range" id="xRot" value="0" min="-3.15" max="3.15" step="0.001" >
+    </div>
+
+    <div class="row">
+        <label>yRot</label>
+        <input type="range" id="yRot" value="0" min="-3.15" max="3.15" step="0.001" >
+    </div>
+
+    <div class="row">
+        <label>zRot</label>
+        <input type="range" id="zRot" value="0" min="-3.15" max="3.15" step="0.001" >
+    </div>
+
+    <div class="row">
+        <label>Scale</label>
+        <input type="range" id="scale" value="1" min="0.1" max="2.0" step="0.1" >
+    </div>
+
+    <div class="row">
+        <label>Pole Scale</label>
+        <input type="range" id="pscale" value="0.4" min="0.1" max="1.0" step="0.01" >
+    </div>
+
+    <div class="row">
+        <label>Pole Clip</label>
+        <input type="range" id="pclip" value="0.75" min="0.01" max="1.0" step="0.01" >
+    </div>
+
+    <div class="row">
+        <label>Pole Only</label>
+        <input type="range" id="ponly" value="0" min="0" max="1.0" step="1" >
+    </div>
+</div>
+<!-- #endregion -->
+</body></html>
