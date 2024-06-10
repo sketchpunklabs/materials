@@ -1,0 +1,431 @@
+<!DOCTYPE html><html lang="en"><head><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script src="../../import-map.js"></script><script type="module">
+import useThreeWebGL2, { useDarkScene, THREE } from '../../lib/useThreeWebGL2.js';
+
+let App   = useDarkScene( useThreeWebGL2() );
+let Ref   = {};
+
+window.addEventListener( 'load', async _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.sphericalLook( 0, 20, 3.5, [0,1.0,0]);
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const tex = new THREE.TextureLoader().load( '../../assets/imgs/textures/UVbw.png' );
+    tex.wrapS = THREE.RepeatWrapping; // THREE.ClampToEdgeWrapping
+    tex.wrapT = THREE.RepeatWrapping; // THREE.ClampToEdgeWrapping
+    // tex.flipY  = true;
+
+    // Flat Planet Shader
+    const mat  = customMaterial( tex );
+    Ref.mat    = mat;
+    
+    // Main shape to render flat planet
+    const geo  = geoBuffer( UVDisk.create() );
+    const mesh = new THREE.Mesh( geo, mat );
+    mesh.position.y = 1.0;
+    mesh.rotation.x = Math.PI * 0.5;
+    App.scene.add( mesh );
+    
+    // Visually see the wireframe of the UVDisk Shape
+    const wf    = new THREE.WireframeGeometry( geo );
+    const lMesh = new THREE.LineSegments( wf );
+    // lMesh.material.opacity      = 0.95;
+    lMesh.material.transparent  = true;
+    lMesh.material.color        = new THREE.Color( 0x00ff00 );
+    lMesh.position.y            = 1.0;
+    lMesh.position.z            = 0.01;
+    lMesh.rotation.x            = Math.PI * 0.5;
+
+    App.scene.add( lMesh );
+    
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.renderLoop();
+    setupUI();
+});
+
+// #region UI
+function elm( id ){ return document.getElementById( id ) }
+function onIn( el, fn ){ el.addEventListener( 'input', fn ); }
+function setupUI(){
+    onIn( elm( 'xRot' ), e=>{ Ref.mat.xRot = parseFloat( e.target.value ); } );
+    onIn( elm( 'yRot' ), e=>{ Ref.mat.yRot = parseFloat( e.target.value ); } );
+    onIn( elm( 'zRot' ), e=>{ Ref.mat.zRot = parseFloat( e.target.value ); } );    
+    onIn( elm( 'scale' ), e=>{ Ref.mat.scale = parseFloat( e.target.value ); } );
+    onIn( elm( 'pscale' ), e=>{ Ref.mat.pscale = parseFloat( e.target.value ); } );
+    onIn( elm( 'pclip' ), e=>{ Ref.mat.pclip = parseFloat( e.target.value ); } );
+}
+// #endregion
+
+// #region SHADER
+// MAIN  : https://emildziewanowski.com/flat-planets/
+// EXTRA : https://emildziewanowski.com/flowfields/
+
+function customMaterial( tex ){
+    // #region PROPS
+    // props = Object.assign( {
+        // baseColor : 0x00ffff,
+        // tex       : null,
+    // }, props );
+    // #endregion
+
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        side            : THREE.DoubleSide,
+        transparent     : true, 
+        // forceSinglePass : true,             
+        // alphaToCoverage : true,             
+        // lights          : true,
+
+        uniforms        : {
+            // baseColor : { type :'vec3', value: new THREE.Color( props.baseColor ) },
+            tex     : { type :'sampler2D', value: tex },
+            xRot    : { type :'float', value: 0.0 },
+            yRot    : { type :'float', value: 0.0 },
+            zRot    : { type :'float', value: 0.0 },
+            scale   : { type :'float', value: 1.0 },
+
+            pscale  : { type :'float', value: 0.4 },
+            pclip   : { type :'float', value: 0.75 },
+        },
+
+        extensions      : { derivatives : true },
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragLPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        // ################################################################
+
+        void main(){
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            vec3 pos = position;
+            
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            vec4 wPos 	        = modelMatrix * vec4( pos, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;               // View Space
+            
+            fragUV              = uv;
+            fragWPos            = wPos.xyz;
+            fragLPos            = position;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position			= projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+
+        in  vec3    fragWPos;
+        in  vec3    fragLPos;
+        in  vec3    fragNorm;
+        in  vec2    fragUV;
+        out vec4    outColor;
+
+        uniform sampler2D tex;
+        uniform float xRot;
+        uniform float yRot;
+        uniform float zRot;
+        uniform float scale;
+        uniform float pscale;
+        uniform float pclip;
+
+        // ################################################################
+
+        // #region SPHERICAL
+
+        // UV must be in the range of -1:1
+        vec4 spherePosWithMask( vec2 uv ){
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Compute Circle Mask
+            float sqUVLen  = dot( uv, uv );
+            float mask     = step( sqUVLen, 1.0 );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Compute sphere position from UV & sphere radius
+            // XY = UV * Radius, Z = sqrt( Radius^2 - UVLen^2 )
+            return ( mask > 0.0 )
+                ? vec4( uv, sqrt( 1.0 - sqUVLen ), mask )
+                // : vec4( 0.0, 0.0, 0.0, mask );           // No good for dealing with lighting & glows
+                : vec4( 
+                    clamp( vec2(-1.0), vec2(1.0), uv ),     // Extend the pos past the circle mask
+                    0.0,
+                    mask
+                );
+        }
+
+
+        // Convert position to warped UV
+        vec2 sphericalPosUV( vec3 pos, float scale ){
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            float x  = sqrt( 1.0 - pos.y * pos.y ); // X at Y
+            float gx = pos.x / x * sign( pos.z );   // Curve X inward from square to arc
+            vec2  xy = vec2( gx, pos.y );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Asin returns -1.57:1.57 with input -1:1, which is range of Half PI
+            // Divide by Pi creates a range of -0.5:0.5
+            // Add 0.5 to remap the final result between 0:1
+            return asin( xy ) / 3.14159 * scale + 0.5;
+        }
+        // #endregion
+
+        // #region ROTATION
+        mat3x3 rotYXZ(float rx, float ry, float rz) {
+            // flip sign cause AI couldn't fix the order of operations to make the X rotation correct
+            float cosX = cos(-rx); 
+            float sinX = sin(-rx);
+            float cosY = cos(ry);
+            float sinY = sin(ry);
+            float cosZ = cos(rz);
+            float sinZ = sin(rz);
+            // xx yx zx
+            // xy yy zy
+            // xz yz zz
+            return mat3x3(
+                cosY * cosZ + sinX * sinY * sinZ,   cosX * sinZ,  -sinY * cosZ + cosY * sinX * sinZ,
+               -cosY * sinZ + sinX * sinY * cosZ,   cosX * cosZ,   sinY * sinZ + cosY * sinX * cosZ,
+                cosX * sinY,                       -sinX,          cosX * cosY
+            );
+        }
+        // #endregion
+
+        void main(){
+            outColor = vec4( 0.0, 0.0, 0.0, 1.0 );
+            // outColor = texture( tex, fragUV );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Proc flat sphere with uv coordinates
+            vec2 cuv    = fragUV; // ( fragUV - 0.5 ) * 2.0;// Remap 0:1 to -1:1
+            vec4 cpos   = spherePosWithMask( cuv );         // Map UV to Spherical Position, W=CircleMask
+            float cMask = cpos.w;                           // Circle Mask
+
+            mat3 rot  = rotYXZ( xRot, yRot, zRot );
+            vec3 rpos = rot * cpos.xyz;                     // Rotate sphere position
+            vec2 suv  = sphericalPosUV( rpos, scale );      // Convert rotated point to UV
+            outColor  = texture( tex, suv.xy ) * cMask;     // Get pixel & apply circle mask
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Compute Pole Patch
+            vec2 puv        = rpos.xz * pscale * cMask;                 // polarUVWithRotation( rpos * cMask, 0.0 );
+            float pmask     = step( pclip, abs( rpos.y ) );             // Mask the poles 
+            vec3 pcolor     = texture( tex, puv ).rgb * pmask * cMask;  // Add Circle mask to remove odd artifact when lighting
+            // outColor.rgb    = pcolor;
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Mix Sphere with Pole Patch
+            outColor.rgb = mix( outColor.rgb, pcolor, pmask );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Lighting
+            vec3 LP   = vec3( 3.0, 3.0, 3.0 );      // Light Position
+            vec3 L    = normalize( LP - cpos.xyz ); // Light Direction
+            vec3 N    = normalize( cpos.xyz );      // Sphere point direction
+
+            float NdL = max( dot( N, L ), 0.0 );    // Lambertian
+            
+            // float NdL = dot( N, L ) * 0.5 + 0.5;    // Half Lambert
+            // NdL = NdL * NdL;                        // Curve the value a bit for better shadows
+
+            // outColor = vec4( vec3( NdL ), 1.0 );
+
+            outColor.rgb *= NdL;    // Apply Lighting
+            outColor.a    = cMask;  // Apply Circle Mask
+            
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            /// Atmosphere Glow
+
+            // Z is at max radius if 1 at center then zero at max edge
+            // So its a good value to use to mask the distance from the center of sphere.
+            // Inverse the Z value then curve the gradient value to push things out
+            // more torward the edges
+            float fresnel = pow( 1.0 - cpos.z, 3.5 );
+            // outColor = vec4( vec3(fresnel), 1.0 );
+
+            // Mask for the glow around the circle mask
+            float glowMask = 1.0 - pow( smoothstep( 1.0, 1.15, length( cuv ) ) , 0.3 );
+            // outColor = vec4( vec3(glowMask), 1.0 );
+
+            // Extend the Lighting model to to clip the final mask
+            float extNdL = max( dot( N, L ) + 0.5, 0.0 );
+            // outColor = vec4( vec3( extNdL ), 1.0 );
+
+            float haloMask = glowMask * fresnel * extNdL;
+            // outColor = vec4( vec3( haloMask ), 1.0 );
+            // outColor = vec4( vec3( haloMask + cMask ), 1.0 ); // ALPHA MASK TEST
+
+            // Apply final mask with a color & step correct masking for alpha
+            outColor.rgb += haloMask * vec3( 1.0, 0.0, 0.0 );
+            outColor.a    = haloMask + cMask;
+        }`
+    });
+
+    // Object.defineProperty( mat, 'baseColor', { set: ( v )=>{ mat.uniforms.baseColor.value.set( v ); } });
+
+    Object.defineProperty( mat, 'zRot', { set: ( v )=>{ mat.uniforms.zRot.value = v; } });
+    Object.defineProperty( mat, 'yRot', { set: ( v )=>{ mat.uniforms.yRot.value = v; } });
+    Object.defineProperty( mat, 'xRot', { set: ( v )=>{ mat.uniforms.xRot.value = v; } });
+
+    Object.defineProperty( mat, 'scale', { set: ( v )=>{ mat.uniforms.scale.value = v; }  });
+    Object.defineProperty( mat, 'pscale', { set: ( v )=>{ mat.uniforms.pscale.value = v; } });
+    Object.defineProperty( mat, 'pclip', { set: ( v )=>{ mat.uniforms.pclip.value = v; } });
+
+    return mat;
+}
+// #endregion
+
+// #region GEOMETRY
+
+class UVDisk{
+    static create( _props ){
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Setup
+        const props = Object.assign({
+            oradius : 1,
+            iradius : 0.85,
+        }, _props );
+
+        const rtn = { 
+            indices  : [],
+            texcoord : [],
+            vertices : [],
+        };
+        
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Build Vertices & UV
+        const edges  = 12;
+        const offset = Math.PI * -0.5;
+        let rad, x, y;
+
+        for( let i=0; i < edges; i++ ){
+            rad = Math.PI * 2 * ( i / edges );
+            x   = Math.cos( rad + offset );
+            y   = Math.sin( rad + offset );
+
+            rtn.vertices.push( x * props.oradius, 0, y * props.oradius );
+            rtn.texcoord.push(
+                ( Math.abs( x ) < 0.00001 )? 0 :  x / props.iradius, 
+                ( Math.abs( y ) < 0.00001 )? 0 : -y / props.iradius,
+            );
+        }
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Compute Triangle Indices
+
+        // Ring 1
+        for( let i=0; i < edges; i+=2 ) rtn.indices.push( (i+3) % edges, (i+2) % edges, i+1 );
+
+        // Ring 2
+        for( let i=0; i < edges; i+=4 ) rtn.indices.push( (i+5) % edges, (i+3) % edges, i+1 );
+
+        // Ring 3
+        for( let i=0; i < edges; i+=8 ) rtn.indices.push( (i+9) % edges, (i+5) % edges, i+1 );
+
+        return rtn;
+    }
+}
+
+function geoBuffer( props ){
+    const p = Object.assign( {
+        indices     : null,
+        normal      : null,
+        uv          : null,
+        joints      : null,
+        weights     : null,
+        skinSize    : 4,
+    }, props );
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute( 'position', new THREE.BufferAttribute( 
+        ( p.vertices instanceof Float32Array )? p.vertices : new Float32Array( p.vertices ),
+        3
+    ));
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Optional vertex buffers
+    if( p.indices ) geo.setIndex( new THREE.BufferAttribute( 
+        ( p.indices instanceof Uint16Array )? p.indices : new Uint16Array( p.indices ),
+        1 
+    ));
+
+    if( p.normals ) geo.setAttribute( 'normal', new THREE.BufferAttribute( 
+        ( p.normals instanceof Float32Array )? p.normals : new Float32Array( p.normals ),
+        3
+    ));
+
+    if( p.texcoord ) geo.setAttribute( 'uv', new THREE.BufferAttribute( 
+        ( p.texcoord instanceof Float32Array )? p.texcoord : new Float32Array( p.texcoord ), 
+        2
+    ));
+    
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Skinned Buffers
+    if( p.joints && p.weights ){
+        geo.setAttribute( 'skinWeight', new THREE.BufferAttribute(
+            ( p.weights instanceof Float32Array )? p.weights : new Float32Array( p.weights ), 
+            p.skinSize 
+        ));
+
+        geo.setAttribute( 'skinIndex',  new THREE.BufferAttribute(
+            ( p.joints instanceof Float32Array )? p.joints : new Float32Array( p.joints ), 
+            p.skinSize 
+        ));
+    }
+
+    return geo;
+}
+
+// #endregion
+
+</script>
+<!-- #region UI -->
+<style>
+    *{ font-family: monospace; font-size:14px; }
+    .over{ position:fixed; bottom:10px; left:10px; width:350px; }
+
+    .row{ display:flex; flex-direction:row; color:white; align-items: center; }
+    .row > label{ flex:0 0 90px; }
+    .row > input{ flex:1 1 auto; }
+</style>
+<div class="over">
+    <div class="row">
+        <label>xRot</label>
+        <input type="range" id="xRot" value="0" min="-3.15" max="3.15" step="0.001" >
+    </div>
+
+    <div class="row">
+        <label>yRot</label>
+        <input type="range" id="yRot" value="0" min="-3.15" max="3.15" step="0.001" >
+    </div>
+
+    <div class="row">
+        <label>zRot</label>
+        <input type="range" id="zRot" value="0" min="-3.15" max="3.15" step="0.001" >
+    </div>
+
+    <div class="row">
+        <label>Scale</label>
+        <input type="range" id="scale" value="1" min="0.1" max="2.0" step="0.1" >
+    </div>
+
+    <div class="row">
+        <label>Pole Scale</label>
+        <input type="range" id="pscale" value="0.4" min="0.1" max="1.0" step="0.01" >
+    </div>
+
+    <div class="row">
+        <label>Pole Clip</label>
+        <input type="range" id="pclip" value="0.75" min="0.01" max="1.0" step="0.01" >
+    </div>
+</div>
+<!-- #endregion -->
+</body></html>
