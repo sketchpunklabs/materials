@@ -1,0 +1,449 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../../lib/Starter.js';
+import Suzanne              from '../lib/Suzanne.js';
+// import Cube                 from '../../lib/meshes/Cube.js';
+import Sphere               from '../../lib/meshes/Sphere.js';
+import Cylinder             from '../../lib/meshes/Cylinder.js';
+
+import { vec3, vec4, quat } from 'gl-matrix';
+
+let App;
+let Debug = {};
+let Ref   = {};
+
+window.addEventListener( "load", async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App = new Starter( { webgl2:false, grid:true, lights:true } );
+    App.setCamera( 0, 20, 4, [0, 0.5, 0] );
+    App.onRender = onRender;
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const mat  = customMaterial();
+
+    /* Unit Size 
+    const c    = Cylinder( { mat, pos:[0,0,0], radius:0.5, height:1.0 } ); */
+
+    /* Large 
+    const c    = Cylinder( { mat, pos:[0,0,0], radius:0.5, height:2.0 } ); */
+
+    /* At Origin 
+    const c    = Cylinder( { mat, pos:[0,0,0], radius:0.5, height:1.0 } );
+    c.geometry.translate( 0, 0.5, 0 ); */
+
+    const c = await Suzanne( mat, [0,0.6,0] )
+
+    c.material
+        .fitMesh( c )
+        .setFill( 0.6 )
+        .setWobble( 0, 0 )
+        .setFoamHeight( 0.05 );
+
+    const cc = c.clone();
+    cc.material = new THREE.MeshPhongMaterial( { transparent:true, opacity:0.5, color:0xffffff, side:THREE.DoubleSide, alphaToCoverage : true, }  );
+    cc.scale.setScalar( 1.1 );
+
+    const grp = new THREE.Group();
+    grp.add( c, cc );
+    App.add( grp );
+
+    // App.add( await Suzanne( mat, [0,0.6,0] ) );
+
+    // grp.rotation.z = -45 * Math.PI / 180;
+    // grp.scale.set( 1.0, 3.0, 1.0 );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // c.geometry.computeBoundingBox();
+    // console.log( c.geometry.boundingBox.min.toArray(), c.geometry.boundingBox.max.toArray() );
+    // c.material.fillAmount = [0,0.5,0];
+    // App.add( c );
+
+    Ref.mesh = c;
+    Ref.grp  = grp;
+    
+    setTimeout( ()=>{
+        // Ref.grp.position.x = 2;
+        // Ref.grp.rotation.z = -45 * Math.PI / 180;
+    }, 1000 );
+
+    setInterval( ()=>{
+        Ref.grp.position.x = -1 + Math.random() * 2;
+        Ref.grp.rotation.z = ( 360 * Math.random()) * Math.PI / 180;
+    }, 2000 );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.render();
+});
+
+let swop = 0;
+function onRender( dt, et ){
+
+    Ref.mesh.material.updateWobble( dt, et );
+
+
+    // const o = state.grp;
+    // const q = [0,0,0,0];
+    // quat.rotateZ( q, o.quaternion.toArray(), -1.0 * Math.PI / 180 );
+    // o.quaternion.fromArray( q );
+    
+    // const m = state.mesh;
+    // if( (Math.floor( et / 3 ) & 1) == 1 && swop == 0 ){
+    //     swop = 1;
+    //     const q = [0,0,0,0];
+    //     quat.rotateZ( q, m.quaternion.toArray(), 90 * Math.PI / 180 );
+    //     // m.quaternion.fromArray( q );
+    //     m.position.fromArray( [-1,0,0] );
+    // }else if( (Math.floor( et / 3 ) & 1) == 0 && swop == 1 ){
+    //     swop = 0;
+    //     const q = [0,0,0,0];
+    //     quat.rotateZ( q, m.quaternion.toArray(), -90 * Math.PI / 180 );
+    //     // m.quaternion.fromArray( q );
+    //     m.position.fromArray( [0,0,0] );
+    // }
+
+    // update( dt, et );
+}
+
+// #region HELPER FUNCTIONS
+// https://pastebin.com/66qSCKcZ
+// https://forum.unity.com/threads/manually-calculate-angular-velocity-of-gameobject.289462/#post-4302796
+function angularVelocity( foreLastFrameRotation, lastFrameRotation, deltaTime ){
+    // var q = lastFrameRotation * Quaternion.Inverse(foreLastFrameRotation);
+    const q  = [0,0,0,1];
+    const qi = [0,0,0,1];
+    quat.invert( qi, foreLastFrameRotation );
+    quat.mul( q, lastFrameRotation, qi );
+    
+    // no rotation?
+    // You may want to increase this closer to 1 if you want to handle very small rotations.
+    // Beware, if it is too close to one your answer will be NaN
+    if( Math.abs( q[3] ) > 1023.5 / 1024.0 ) return [0,0,0];
+    
+    let gain;
+    // handle negatives, we could just flip it but this is faster
+    if( q[3] < 0.0 ){
+        const angle = Math.acos( -q[3] );
+        gain = -2.0 * angle / ( Math.sin( angle ) * deltaTime );
+    }else{
+        const angle = Math.acos( q[3] );
+        gain = 2.0 * angle / ( Math.sin( angle ) * deltaTime );
+    }
+
+    let angularVelocity = [ q[0] * gain, q[1] * gain, q[2] * gain ];
+    if( isNaN( angularVelocity[2] ) ) angularVelocity = [0,0,0];
+
+    return angularVelocity;
+}
+
+function lerp( a, b, t ){ return a * (1-t) + b * t; }
+
+function clamp( v, min, max ){ return Math.max( Math.min( v, max ), min ); }
+// #endregion
+
+// REFS
+// https://pastebin.com/TxJq8kHX
+// https://pastebin.com/66qSCKcZ
+// https://www.patreon.com/posts/18245226
+// https://www.patreon.com/posts/liquid-shader-76234173
+// https://www.patreon.com/posts/fake-liquid-urp-75665057
+
+function customMaterial( baseColor=0xa0a0a0, useLowPoly=false ){
+    // #region PROPERTIES / VARS
+    const wobble        = [0,0];    // Wobble value used in uniform, update this to update uniform
+    const pivotOffset   = [0,0,0];  // Offset to make BBox center the origin
+    const range         = [0,1];    // height range : [yMin, yMax];
+    let   mesh          = null;     // Ref to mesh this shader is being used on
+    // #endregion
+
+    const mat    = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        transparent 	: true, 
+        side            : THREE.DoubleSide, // Need to render backface
+        forceSinglePass : true,             // Needed to use gl_FrontFacing with rev:150
+        alphaToCoverage : true,             // Shading with gl_FrontFacing
+
+        uniforms        : { 
+            frontColorA : { type :'vec3', value:new THREE.Color( 0x6FF459 ) },
+            frontColorB : { type :'vec3', value:new THREE.Color( 0xEEF350 ) },
+            foamColor   : { type :'vec3', value:new THREE.Color( 0xEEF350 ) },
+            sliceColor  : { type :'vec3', value:new THREE.Color( 0x07DD7B ) },
+
+            wobble      : { type:'vec2',  value: wobble, },
+            pivotOffset : { type:'vec3',  value: pivotOffset },
+            clipY       : { type:'float', value: 0 },
+            foamHeight  : { type:'float', value: 0.1 },
+        },
+
+        extensions      : { 
+            derivatives : true
+        },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        uniform mediump vec3 pivotOffset;
+        uniform vec2 wobble;
+
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        out vec3    fragWLPos; 
+
+        // #####################################################################
+        // #region FUNCTIONS
+        vec3 vec3RotX( vec3 v, float deg ){
+            float rad = deg * 0.01745329251;
+            float c   = cos( rad );
+            float s   = sin( rad );
+            return vec3( 
+                v.x,
+                v.y * c - v.z * s,
+                v.y * s + v.z * c
+            );
+        }
+
+        vec3 vec3RotZ( vec3 v, float deg ){
+            float rad = deg * 0.01745329251;
+            float c   = cos( rad );
+            float s   = sin( rad );
+            return vec3( 
+                v.x * c - v.y * s,
+                v.x * s + v.y * c,
+                v.z
+            );
+        }
+
+        vec3 decomposeScaleFromMat4( mat4 m ){
+            return vec3(
+                length( vec3( m[0][0], m[0][1], m[0][2] ) ),
+                length( vec3( m[1][0], m[1][1], m[1][2] ) ),
+                length( vec3( m[2][0], m[2][1], m[2][2] ) )
+            );
+        }
+
+        mat3 decomposeRotFromMat4( mat4 m ){
+            // NOTE: This will break if user does uses a scale of zero... 
+            // but that a rare edge case
+            
+            vec3 s = 1.0 / decomposeScaleFromMat4( m ); // Invert to make it a mul op
+            return mat3( 
+                m[0][0] * s.x, m[0][1] * s.x, m[0][2] * s.x,
+                m[1][0] * s.y, m[1][1] * s.y, m[1][2] * s.y,
+                m[2][0] * s.z, m[2][1] * s.z, m[2][2] * s.z
+            );
+        }
+
+        // #endregion
+        // #####################################################################
+
+        void main(){
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Apply rotation & Scale, but cancel out translation: So.. World Local?
+            // vec4 wlPos    = modelMatrix * vec4( position - pivotOffset, 0.0 );
+
+            // if we decompose rotation out of modelMatrix, We can simplify fragment shader
+            // by just using worldspace rotation on local space position. No need to scale
+            // range height because of scaling.
+            mat3 modelRot = decomposeRotFromMat4( modelMatrix );
+            vec3 wlPos    = modelRot * ( position - pivotOffset );
+
+            vec3 xAxis = vec3RotZ( wlPos.xyz, 90.0 );   // Wobble Axis Directions
+            vec3 zAxis = vec3RotX( wlPos.xyz, 90.0 );
+
+            fragWLPos  = wlPos.xyz + 
+                         xAxis * wobble.y + 
+                         zAxis * wobble.x;
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            vec4 wPos           = modelMatrix * vec4( position, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;                    // View Space
+
+            fragUV              = uv;
+            fragWPos            = wPos.xyz;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position = projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+
+        uniform vec3 cameraPosition;
+
+        uniform vec3 frontColorA;
+        uniform vec3 frontColorB;
+        uniform vec3 foamColor;
+        uniform vec3 sliceColor;
+
+        uniform mediump vec3 pivotOffset;
+        uniform float clipY;
+        uniform float foamHeight;
+
+        in vec3 fragWPos;
+        in vec3 fragNorm;
+        in vec2 fragUV;
+        in vec3 fragWLPos; 
+
+        out vec4    outColor;
+
+        // #####################################################################
+
+
+        // #####################################################################
+
+        void main(){
+            // if( fragWPos.y >= 0.5 ) discard;
+            
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Front Face / Area not clipped away
+            float isClip     = 1.0 - step( clipY - pivotOffset.y, fragWLPos.y );
+            float yGrad      = ( clipY - pivotOffset.y) - fragWLPos.y;
+            vec3 frontColor  = mix( frontColorA, frontColorB, yGrad );
+
+
+            vec3 norm       = normalize( fragNorm );
+            vec3 viewDir    = normalize( cameraPosition - fragWPos );
+            float NdV       = clamp( dot( norm, viewDir ), 0.0, 1.0 );
+            float fresnel   = clamp( pow( 1.0 - NdV, 3.0 ), 0.0, 1.0 );
+
+            frontColor     += foamColor * fresnel;
+
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Foam
+            float isFloam      = step( clipY - pivotOffset.y - foamHeight, fragWLPos.y );
+            float isSliceFloam = step( clipY - pivotOffset.y - 0.02, fragWLPos.y );
+            vec3 clipColor     = mix( sliceColor, foamColor, isSliceFloam );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Mix colors
+            outColor.a    = isClip;
+            outColor.rgb  = mix( 
+                frontColor, 
+                foamColor, 
+                isFloam
+            );
+
+            outColor.rgb = ( gl_FrontFacing )? 
+                outColor.rgb : 
+                clipColor;
+
+            // outColor.rgb = vec3( fresnel );
+
+        }`
+    });
+
+    // #region EXTEND MAT - SETTERS
+    mat.fitMesh = ( m )=>{
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Get the mesh's bounding box
+        m.geometry.computeBoundingBox();
+        const min  = m.geometry.boundingBox.min.toArray();
+        const max  = m.geometry.boundingBox.max.toArray();
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Get min/max y as the height range
+        range[ 0 ] = min[ 1 ];
+        range[ 1 ] = max[ 1 ];
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Get center of bounding box
+        pivotOffset[ 0 ] = min[ 0 ] * 0.5 + max[ 0 ] * 0.5;
+        pivotOffset[ 1 ] = min[ 1 ] * 0.5 + max[ 1 ] * 0.5;
+        pivotOffset[ 2 ] = min[ 2 ] * 0.5 + max[ 2 ] * 0.5;
+
+        mesh = m;
+        return mat;
+    };
+
+    mat.setFill = ( t )=>{
+        mat.uniforms.clipY.value = range[ 0 ] * (1-t) + range[ 1 ] * t;
+        return mat;
+    };
+
+    mat.setWobble = ( x, z )=>{
+        wobble[ 0 ] = x;
+        wobble[ 1 ] = z;
+        return mat;
+    }
+
+    mat.setFoamHeight = ( n )=>{
+        mat.uniforms.foamHeight.value = n;
+        return mat;
+    }
+    // #endregion
+
+    // #region EXTEND MAT - WOBBLE PHYSICS
+    const velPosition  = [0,0,0];                // Temp var to store velocity
+    const prevPosition = [0,0,0];                // Last frame's transform change
+    const prevRotation = [0,0,0,1];
+    const animWobble   = [0,0];                  // Current animation values for wobble effect 
+    const v            = new THREE.Vector3();    // Needed to pull WS values from 3JS
+    const q            = new THREE.Quaternion();
+
+    let maxWobble     = 0.4;
+    let decaySpeed    = 5.0;
+    let decayWobble   = 0.9;
+    mat.updateWobble = ( dt, et )=>{
+        const curPos = mesh.getWorldPosition( v ).toArray();
+        const curRot = mesh.getWorldQuaternion( q ).toArray();
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Is there any movement create wobble rotation
+        if( vec3.sqrDist( curPos, prevPosition ) > 0 ||
+            vec4.sqrDist( curRot, prevRotation ) > 0
+        ){
+            // Translation Velocity : velocity = (lastPos - curPos) / deltaTime;
+            vec3.sub( velPosition, prevPosition, curPos );
+            vec3.scale( velPosition, velPosition, 1 / dt );
+
+            // Rotational Velocity
+            const angVel = angularVelocity( prevRotation, curRot, dt );
+
+            // Save current transform for next frame
+            vec3.copy( prevPosition, curPos );
+            quat.copy( prevRotation, curRot );
+
+            // Compute additional wobble from position & rotational velocity
+            animWobble[0] += clamp(
+                ( velPosition[0] + ( velPosition[1] * 0.2 ) + angVel[1] + angVel[2] ) * maxWobble, 
+                -maxWobble, maxWobble
+            );
+
+            animWobble[1] += clamp(
+                ( velPosition[2] + ( velPosition[1] * 0.2 ) + angVel[1] + angVel[0]) * maxWobble, 
+                -maxWobble, maxWobble
+            );
+        }
+
+        // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Animate Wobble
+        if( animWobble[0] !== 0 || animWobble[1] !== 0 ){
+            // Oscillation as the value decays
+            const wx = Math.sin( et * decaySpeed ) * animWobble[0];
+            const wz = Math.sin( et * decaySpeed ) * animWobble[1];
+
+            // Update uniforms
+            mat.setWobble( wz, wx );
+
+            // Decay the wobble rotations
+            animWobble[0] = lerp( animWobble[0], 0, dt * decayWobble );
+            animWobble[1] = lerp( animWobble[1], 0, dt * decayWobble );
+
+            // Zero out to end animation
+            if( Math.abs( animWobble[0] ) <= 0.001) animWobble[0] = 0;
+            if( Math.abs( animWobble[1] ) <= 0.001) animWobble[1] = 0;
+        }
+    };
+    // #endregion
+
+    return mat;
+}
+
+</script></body></html>

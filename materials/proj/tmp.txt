@@ -1,0 +1,15 @@
+        mat3x3 rotMat3( float pitch, float roll ){
+            float cosPitch = cos( pitch );
+            float sinPitch = sin( pitch );
+            float cosRoll  = cos( roll );
+            float sinRoll  = sin( roll );
+
+            // xx yx zx
+            // xy yy zy
+            // xz yz zz
+            return mat3x3(
+                cosRoll, -sinRoll * cosPitch,  sinRoll * sinPitch,
+                sinRoll,  cosRoll * cosPitch, -cosRoll * sinPitch,
+                0.0,      sinPitch, cosPitch
+            );
+        }

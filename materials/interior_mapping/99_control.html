@@ -1,0 +1,174 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../../lib/Starter.js';
+
+let App;
+let Debug = {};
+let Ref   = {};
+
+window.addEventListener( "load", _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App = new Starter( { webgl2:true, grid:true } );
+	App.setCamera( 0, 10, 4, [0,0.6,0] ).render();
+
+    const texCube = new THREE.CubeTextureLoader()
+        .setPath( '../../assets/imgs/cubemap/' )
+        .load( [
+            'test_xp.jpg',
+            'test_xn.jpg',
+            'test_yp.jpg',
+            'test_yn.jpg',
+            'test_zp.jpg',
+            'test_zn.jpg'
+        ] );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Ref.mat    = customMaterial( texCube );
+    const geo  = new THREE.PlaneGeometry( 1, 1 );
+    const mesh = new THREE.Mesh( geo, Ref.mat );
+    mesh.position.y = 0.6;
+    App.add( mesh );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // UI
+    onChange( 'uDepth', e=>{ Ref.mat.uDepth = e.target.value; } );
+});
+
+function onChange( id, fn ){ document.getElementById( id ).addEventListener( 'change', fn, true ); }
+
+// Original Shader Graph
+// https://www.artstation.com/artwork/0nwDlV
+// https://cdna.artstation.com/p/assets/images/images/038/628/008/large/walter-bonefacic-interiorwindow.jpg?1623626462
+function customMaterial( texCube ){
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        side            : THREE.DoubleSide,
+
+        uniforms        : { 
+            texCube : { type :'samplerCube', value: texCube },
+            uDepth  : { type :'float', value: 1 },
+        },
+
+        extensions      : { derivatives : true },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        void main(){
+            vec4 wPos 	        = modelMatrix * vec4( position, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;                    // View Space
+            
+            fragUV              = uv;
+            fragWPos            = wPos.xyz;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position			= projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+        
+        uniform samplerCube texCube;
+        uniform float uDepth;
+        uniform vec3 cameraPosition;
+
+        in  vec3    fragWPos;
+        in  vec3    fragNorm;
+        in  vec2    fragUV;
+        out vec4    outColor;
+
+        // #####################################################################
+
+        // https://irrlicht.sourceforge.io/forum/viewtopic.php?t=52284
+        // Compute Tangent & BiTangent to create TBN-Matrix
+        // NOTE: smoothNormal is the interpolated normal from the vertex shader without being normalized
+        mat3 tbnMatrix( vec3 smoothNormal, vec3 pos, vec2 uv ){
+            vec3 denormTangent = dFdx( uv.y ) * dFdy( pos ) - dFdx( pos ) * dFdy( uv.y );
+            vec3 tangent       = normalize( denormTangent - smoothNormal * dot( smoothNormal, denormTangent ) );
+ 
+            vec3 norm          = normalize( smoothNormal );
+            vec3 bitangent     = cross( norm, tangent );
+
+            mat3 tbn		   = mat3( tangent, bitangent, norm );
+            return tbn;
+        }
+
+        float minComponent( vec3 v ){ return min( min ( v.x, v.y ), v.z ); }
+
+        // #####################################################################
+        void main(){
+            vec3 norm      = normalize( fragNorm );
+            outColor = vec4( 1.0, 0.0, 0.0, 1.0 );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // VIEW VECTOR
+            vec3 frag2Eye  = normalize( cameraPosition - fragWPos );
+            mat3 tbn       = tbnMatrix( fragNorm, fragWPos, fragUV );
+            vec3 tanView   = normalize( tbn * frag2Eye );     // Move to Eye Direction into Tangent Space
+            tanView *= 1.0;
+            
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // TILING & OFFSET
+            vec2 tiling = vec2( 1.0, 1.0 );
+            vec2 offset = vec2( 0.0, 0.0 );
+            vec2 uv     = fract( fragUV * tiling + offset ) ;        
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // VIRTUAL CUBEMAP
+            float width  = 1.0;
+            float height = 1.0;
+            float depth  = 1.0;
+
+            vec2 nuv = uv * 2.0 - 1.0; // Remap 01 to n11;
+            vec3 pos = vec3(
+                nuv.x * width,
+                nuv.y * height,
+                depth
+            );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // CORNER COORDINATES
+            vec3 tanViewInv = 1.0 / tanView;
+
+            // DEFINE CORNER ???
+            float fmin = minComponent( abs( tanViewInv ) - tanViewInv * pos );
+
+            // RAYCAST + INTERSECTION
+            vec3 dir = tanView * fmin + pos;
+            // dir *= vec3( -1.0, -1.0, 1.0 );
+            dir *= vec3( 1.0, 1.0, -1.0 );
+
+            // dir = reflect( dir, vec3( 0.0 ) );
+
+            outColor = texture( texCube, dir );
+
+            // outColor.rgb = tanView.rgb;
+        }`
+    });
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // SETTERS
+    Object.defineProperty( mat, 'uDepth', {
+        set: ( v )=>{ mat.uniforms.uDepth.value = v; }
+    });
+
+    return mat;
+}
+
+</script>
+
+<div style="position:fixed; top:10px; left:10px; display:flex; align-items: center;">
+    Depth :
+    <input type="range" id="uDepth" min="0.5" max="2" step="0.1" value="1.0">
+</div>
+
+</body></html>

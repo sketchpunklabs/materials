@@ -1,0 +1,178 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+// #region IMPORTS
+import Starter, { THREE }   from '../../lib/Starter.js';
+import ShapePointsMesh     	from '../../lib/meshes/ShapePointsMesh.js';
+import DynLinesMesh        	from '../../lib/meshes/DynLineMesh.js';
+import FloorPlane           from '../../lib/meshes/FloorPlane.js';
+// #endregion
+
+// #region MAIN
+let App;
+let Debug = {};
+let Ref   = {
+    pointLight: {
+        pos         : [ 0, 0.5, 0 ],
+        constant    : 0.5,
+        linear      : 0.1,
+        quadratic   : 0.01,
+    },
+};
+
+window.addEventListener( "load", async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App = new Starter( { webgl2:false, grid:true, lights:true } );
+    App.setCamera( 0, 20, 5, [0, 0.5, 0] );
+    App.onRender = onRender;
+
+    App.add( (Debug.pnt = new ShapePointsMesh() ) );
+    App.add( (Debug.ln  = new DynLinesMesh() ) );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const mat  = customMaterial();
+    const mesh = FloorPlane( { mat, size:2, y:0.01 } );
+    App.add( mesh );
+    
+    Ref.mat = mat;
+
+    mat.props.litpos = Ref.pointLight.pos;
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Debug.pnt.add( Ref.pointLight.pos, 0xffffff, 3 );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.render();
+});
+
+function onRender( dt, et ){
+
+    Ref.pointLight.pos[ 1 ] = ( Math.sin( et ) * 0.5 + 0.5 ) * 2.0;
+    Debug.pnt.reset();
+    Debug.pnt.add( Ref.pointLight.pos, 0xffffff, 3 );
+
+}
+// #endregion
+
+// https://google.github.io/filament/Filament.html#lighting/directlighting/directionallights
+
+// https://github.com/mrdoob/three.js/blob/master/src/renderers/shaders/ShaderChunk/lights_fragment_begin.glsl.js
+// https://github.com/mrdoob/three.js/blob/master/src/renderers/shaders/ShaderChunk/lights_phong_pars_fragment.glsl.js
+// https://github.com/mrdoob/three.js/blob/master/src/renderers/shaders/ShaderChunk/lights_physical_fragment.glsl.js
+// https://github.com/mrdoob/three.js/blob/master/src/renderers/shaders/ShaderChunk/lights_fragment_begin.glsl.js
+// https://github.com/mrdoob/three.js/blob/master/src/renderers/shaders/ShaderChunk/lights_physical_pars_fragment.glsl.js
+
+function customMaterial(  ){
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        // transparent 	: true, 
+        // side            : THREE.DoubleSide,
+        // lights          : true,
+
+        uniforms        : { 
+            litpnt_pos  : { value: [0,0.5,0] },
+            litpnt_info : { value: [0.5,0.1,0.01] },  // constant, linear, quadratic
+        },
+
+        extensions      : { 
+            derivatives : true
+        },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        void main(){
+            vec4 wPos 	        = modelMatrix * vec4( position, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;                    // View Space
+            
+            fragUV              = uv;
+            fragWPos            = wPos.xyz;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position			= projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+        
+        uniform vec3 cameraPosition;
+
+        uniform vec3 litpnt_pos;
+        uniform vec3 litpnt_info; // constant, linear, quadratic
+
+        in  vec3    fragWPos;
+        in  vec3    fragNorm;
+        in  vec2    fragUV;
+        out vec4    outColor;
+
+        // #####################################################################
+
+        float pointLight( vec3 norm ){
+            float constant = 0.01; //litpnt_info.x;
+            float linear   = 0.1; //litpnt_info.y;
+            float quad     = 0.01; //litpnt_info.z;
+
+            float radius   = 1.0;
+
+            float cutoffDist = 1.0;
+            float decayExp   = 2.0;
+
+            vec3 litDir    = litpnt_pos - fragWPos;
+            float dist     = length( litDir );
+            litDir         = normalize( litDir );
+
+            //float att     = 1.0 / ( constant + linear * dist + quad * dist * dist );
+            // float att       = clamp( 1.0 - dist / radius, 0.0, 1.0 ); 
+
+            /* Non Physical
+            float att       = pow( clamp( - dist / cutoffDist + 1.0, 0.0, 1.0 ), decayExp );
+            */
+
+            /* Physical, decay value works in reverse 
+            float att = 1.0 / max( pow( dist, decayExp ), 0.01 );
+            att *= pow( clamp( 1.0 - pow( dist / cutoffDist, 4.0 ), 0.0, 1.0 ), 2.0 );
+            */
+
+            /* https://lisyarus.github.io/blog/graphics/2022/07/30/point-light-attenuation.html */
+            float ratio = clamp( dist / cutoffDist, 0.0, 1.0 );
+            float ratio2 = ratio * ratio;
+            float ratio2I = 1.0 - ratio2;
+            float maxIntensity = 1.0;
+            float fallOff = 1.0;
+            // No cusp
+            // float att = ( maxIntensity * ( ratio2I * ratio2I ) ) / ( 1.0 + fallOff * ratio2 );
+            // With Cusp
+            float att = ( maxIntensity * ( ratio2I * ratio2I ) ) / ( 1.0 + fallOff * ratio );
+            
+
+            float diffuse  = max( dot( norm, litDir ), 0.0 );
+
+            return att * diffuse;
+        }
+
+        // #####################################################################
+
+        void main(){
+            outColor = vec4( 0.0, 0.0, 0.0, 1.0 );
+            vec3 norm = normalize( fragNorm );
+
+            outColor.rgb = vec3( pointLight( norm ) );
+        }`
+    });
+
+    mat.props = {};
+
+    Object.defineProperty( mat.props, 'litpos', { set( v ){ mat.uniforms.litpnt_pos.value = v; } });
+
+    return mat;
+}
+
+</script></body></html>

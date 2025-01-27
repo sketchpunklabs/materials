@@ -1,0 +1,587 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../../lib/Starter.js';
+import Suzanne              from '../lib/Suzanne.js';
+// import Cube                 from '../../lib/meshes/Cube.js';
+import Sphere               from '../../lib/meshes/Sphere.js';
+import Cylinder             from '../../lib/meshes/Cylinder.js';
+
+import { vec3, quat } from 'gl-matrix';
+
+let App;
+let Debug = {};
+let Ref   = {};
+
+window.addEventListener( "load", async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App = new Starter( { webgl2:false, grid:true, lights:true } );
+    App.setCamera( 0, 20, 4, [0, 0.5, 0] );
+    App.onRender = onRender;
+
+    // console.log( THREE.REVISION  );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    const mat  = customMaterial();
+    // App.add( Cube.floor( { mat, pos:[2,0,0], scl:1 } ) );
+    // App.add( Sphere( { mat, pos:[0,0.5,0], radius:0.5, scl:1 } ) );
+
+    const c = Cylinder( { mat, pos:[0,0,0], radius:0.5, height:1.0 } );
+    // c.geometry.translate( 0, 1, 0 );
+    c.geometry.computeBoundingBox();
+    console.log( c.geometry.boundingBox.min.toArray(), c.geometry.boundingBox.max.toArray() );
+    // geo.rotateX( -Math.PI * 0.5 ); // Uses matrices, but also rotates normals
+    
+    // c.rotation.z = -30 * Math.PI / 180;
+    c.material.fillAmount = [0,0.5,0];
+    App.add( c );
+
+    state.mesh = c;
+
+    /*
+    BBOX.y: 0 > 2, max 1.56, min: -0.5
+    BBOX.y: -1 > 1, max 0.55, min: -1.5
+    BBOX.y: -0.5 > 0.5, max 0.05, min: -1.0
+    */
+
+    // App.add( Cylinder( { pos:[ 1.5,0,0], radius:0.5, height:2.0 } ) );
+    // App.add( await Suzanne( mat, [0,0.6,0] ) );
+
+    // const q = [0,0,0,0];
+    // quat.rotateZ( q, c.quaternion.toArray(), 45 * Math.PI / 180 );
+    // // console.log( 'x', q );
+    // c.quaternion.fromArray( q );
+
+    // update( 0.03, 0.03 );
+    // update( 0.03, 0.06 );
+    
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.render();
+});
+
+let swop = 0;
+function onRender( dt, et ){
+    
+    // const m = state.mesh;
+    // if( (Math.floor( et / 3 ) & 1) == 1 && swop == 0 ){
+    //     swop = 1;
+    //     const q = [0,0,0,0];
+    //     quat.rotateZ( q, m.quaternion.toArray(), 90 * Math.PI / 180 );
+    //     // m.quaternion.fromArray( q );
+    //     m.position.fromArray( [-1,0,0] );
+    // }else if( (Math.floor( et / 3 ) & 1) == 0 && swop == 1 ){
+    //     swop = 0;
+    //     const q = [0,0,0,0];
+    //     quat.rotateZ( q, m.quaternion.toArray(), -90 * Math.PI / 180 );
+    //     // m.quaternion.fromArray( q );
+    //     m.position.fromArray( [0,0,0] );
+    // }
+
+    // update( dt, et );
+}
+
+// https://pastebin.com/66qSCKcZ
+// https://forum.unity.com/threads/manually-calculate-angular-velocity-of-gameobject.289462/#post-4302796
+function angularVelocity( foreLastFrameRotation, lastFrameRotation, deltaTime ){
+    // var q = lastFrameRotation * Quaternion.Inverse(foreLastFrameRotation);
+    const q  = [0,0,0,1];
+    const qi = [0,0,0,1];
+
+    quat.invert( qi, foreLastFrameRotation );
+    quat.mul( q, lastFrameRotation, qi );
+    
+    // // no rotation?
+    // // You may want to increase this closer to 1 if you want to handle very small rotations.
+    // // Beware, if it is too close to one your answer will be Nan
+    // if ( Mathf.Abs(q.w) > 1023.5f / 1024.0f ) return [0,0,0]; Vector3.zero;
+
+    if( Math.abs( q[3] ) > 1023.5 / 1024.0 ) return [0,0,0];
+    
+    let gain;
+    // handle negatives, we could just flip it but this is faster
+    if( q[3] < 0.0 ){
+        const angle = Math.acos( -q[3] );
+        gain = -2.0 * angle / ( Math.sin( angle ) * deltaTime );
+    }else{
+        const angle = Math.acos( q[3] );
+        gain = 2.0 * angle / ( Math.sin( angle ) * deltaTime );
+    }
+
+    let angularVelocity = [ q[0] * gain, q[1] * gain, q[2] * gain ];
+    if( isNaN( angularVelocity[2] ) ) angularVelocity = [0,0,0];
+
+    return angularVelocity;
+}
+
+
+const state = {
+    recovery: 1,
+    wobbleAmountToAddX: 0,
+    wobbleAmountToAddZ: 0,
+    WobbleSpeedMove: 1,
+
+    velocity        : [0,0,0],
+    angularVelocity : [0,0,0],
+
+    lastPos : [0,0,0],
+    lastRot : [0,0,0,1],
+
+    maxWobble: 0.9,
+    fillAmount: 0.1,
+    sinewave: 0,
+    thickness: 1,
+};
+
+function lerp( a, b, t ){ return a * (1-t) + b * t; }
+function clamp( v, min, max ){ return Math.max( Math.min( v, max ), min ); }
+
+// .localToWorld
+
+function update( dt, et ){
+    // decrease wobble over time
+    state.wobbleAmountToAddX = lerp( state.wobbleAmountToAddX, 0, dt * state.recovery );
+    state.wobbleAmountToAddZ = lerp( state.wobbleAmountToAddZ, 0, dt * state.recovery );
+    // console.log( state.wobbleAmountToAddX, state.wobbleAmountToAddZ );
+
+    // make a sine wave of the decreasing wobble
+    const pulse    = 2 * Math.PI * state.WobbleSpeedMove;
+    // console.log( pulse );
+    
+    state.sinewave = lerp(
+        state.sinewave, 
+        Math.sin( pulse * et ), 
+        clamp(
+            vec3.len( state.velocity ) + vec3.len( state.angularVelocity ), 
+            state.thickness, 
+            10
+        ) * dt
+    );
+
+    // console.log( state.sinewave );
+ 
+    let wobbleAmountX = state.wobbleAmountToAddX * state.sinewave;
+    let wobbleAmountZ = state.wobbleAmountToAddZ * state.sinewave;
+
+    // console.log( wobbleAmountX, wobbleAmountZ );
+
+    // velocity
+    // state.velocity = (lastPos - transform.position) / deltaTime;
+    vec3.sub( state.velocity, state.lastPos, state.mesh.position.toArray() );
+    vec3.scale( state.velocity, state.velocity, 1 / dt );
+
+
+    state.angularVelocity = angularVelocity( state.lastRot, state.mesh.quaternion.toArray(), dt );
+    // console.log( state.angularVelocity );
+
+    // add clamped velocity to wobble
+    state.wobbleAmountToAddX += clamp(
+        (state.velocity[0] + (state.velocity[1] * 0.2) + state.angularVelocity[2] + state.angularVelocity[1]) * state.maxWobble, 
+        -state.maxWobble, 
+        state.maxWobble
+    );
+
+    state.wobbleAmountToAddZ += clamp(
+        (state.velocity[2] + (state.velocity[1] * 0.2) + state.angularVelocity[0] + state.angularVelocity[1]) * state.maxWobble, 
+        -state.maxWobble, 
+        state.maxWobble
+    );
+
+    // console.log( 'xx', state.wobbleAmountToAddX, state.wobbleAmountToAddZ );
+
+    // send it to the shader
+    // rend.sharedMaterial.SetFloat("_WobbleX", wobbleAmountX);
+    // rend.sharedMaterial.SetFloat("_WobbleZ", wobbleAmountZ);
+    state.mesh.material.wobbleX = wobbleAmountX;
+    state.mesh.material.wobbleZ = wobbleAmountZ;
+
+    // console.log( state.mesh.material.uniforms );
+
+    // set fill amount TODO, FINISH
+    UpdatePos( dt );
+
+    // keep last position
+    state.lastPos = state.mesh.position.toArray();
+    state.lastRot = state.mesh.quaternion.toArray();
+}
+
+
+function UpdatePos( dt ) {
+    const box    = state.mesh.geometry.boundingBox;
+    const center = vec3.lerp( [], box.min.toArray(), box.max.toArray(), 0.5 );
+
+    const v = new THREE.Vector3();
+    state.mesh.localToWorld( v.fromArray( center ) );
+
+    const wPos = v.toArray();
+
+    state.mesh.getWorldPosition( v );
+    const pos = vec3.sub( [], wPos, v.toArray() );
+    vec3.sub( pos, pos, [0, state.fillAmount, 0 ] );
+
+    // console.log( pos );
+
+    state.mesh.material.fillAmount = pos;
+
+    // state.mesh.localToWorld();
+    // Vector3 worldPos = transform.TransformPoint(
+    //     new Vector3(mesh.bounds.center.x, mesh.bounds.center.y, mesh.bounds.center.z)
+    // );
+    
+    // pos = worldPos - transform.position - new Vector3(0, fillAmount, 0);
+    // rend.sharedMaterial.SetVector("_FillAmount", pos);
+}
+
+// https://www.patreon.com/posts/18245226
+// https://pastebin.com/TxJq8kHX
+// https://pastebin.com/66qSCKcZ
+function customMaterial( baseColor=0xa0a0a0, useLowPoly=false ){
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        transparent 	: true, 
+        side            : THREE.DoubleSide, // DoubleSide TwoPassDoubleSide
+        forceSinglePass : true,
+        alphaToCoverage : true,
+        // lights       : true,
+
+        uniforms        : { 
+            // color   : { type :'vec3', value:new THREE.Color( baseColor ) },
+            wobbleX : { type:'float', value: 0 },
+            wobbleZ : { type:'float', value: 0 },
+            fillAmount: { type:'vec3', value: [0,-0.0,0] }
+        },
+
+        extensions      : { 
+            derivatives : true
+        },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        uniform float wobbleX;
+        uniform float wobbleZ;
+        uniform vec3  fillAmount;
+
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        // #####################################################################
+        // #region FUNCTIONS
+        float DEG2RAD      = 0.01745329251;
+        // https://docs.unity3d.com/Packages/com.unity.shadergraph@6.9/manual/Rotate-About-Axis-Node.html
+        // axis should be normalized
+        vec3 Unity_RotateAboutAxis_Degrees( vec3 pos, vec3 axis, float degs ){
+            float rads  = degs * DEG2RAD;
+            float s  = sin( rads );
+            float c  = cos( rads );
+            float ci = 1.0 - c;
+
+            mat3x3 rot = mat3x3(
+                ci * axis.x * axis.x + c, 
+                ci * axis.x * axis.y - axis.z * s, 
+                ci * axis.z * axis.x + axis.y * s,
+
+                ci * axis.x * axis.y + axis.z * s, 
+                ci * axis.y * axis.y + c, 
+                ci * axis.y * axis.z - axis.x * s,
+                
+                ci * axis.z * axis.x - axis.y * s, 
+                ci * axis.y * axis.z + axis.x * s, 
+                ci * axis.z * axis.z + c
+            );
+
+            return rot * pos;
+        }
+
+        vec3 axisAngle( vec3 pos, vec3 axis, float degs ){
+            // Rodrigues Rotation formula:
+            // v_rot = v * cos(theta) + cross( axis, v ) * sin(theta) + axis * dot( axis, v) * (1-cos(theta))
+
+            vec3 cp   = cross( pos, axis ); //cross( axis, pos );
+            float d   = dot( axis, pos );
+            float rad = degs * DEG2RAD;
+            float s   = sin( rad );
+            float c   = cos( rad );
+            float ci  = 1.0 - c;
+
+            return pos * c + cp * s + axis * d * ci;
+        }
+        // #endregion
+        // #####################################################################
+
+        out vec3 fillPos;
+
+        void main(){
+            vec4 wPos           = modelMatrix * vec4( position, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;                    // View Space
+            
+            // vec3 fillAmount = vec3( 0.0, 0.3, 0.0 );
+
+            // Apply rotation & Scale, but cancel out translation
+            // So.. World Local?
+            vec4 wlPos = modelMatrix * vec4( position, 0.0 );
+
+            vec3 worldPosOffset = wlPos.xyz - fillAmount;
+            // vec3 worldPosX = Unity_RotateAboutAxis_Degrees( worldPosOffset, vec3(0.0,0.0,1.0), 90.0 );
+            // vec3 worldPosZ = Unity_RotateAboutAxis_Degrees( worldPosOffset, vec3(1.0,0.0,0.0), 90.0 );
+            
+            vec3 worldPosX = axisAngle( worldPosOffset, vec3(0.0,0.0,1.0), 90.0 );
+            vec3 worldPosZ = axisAngle( worldPosOffset, vec3(1.0,0.0,0.0), 90.0 );
+
+            vec3 worldPosAdjusted = wlPos.xyz + ( worldPosX * wobbleX ) + ( worldPosZ * wobbleZ );
+            fillPos = worldPosAdjusted - fillAmount;
+            
+                // // get world position of the vertex - transform position
+                // float3 worldPos = mul (unity_ObjectToWorld, v.vertex.xyz);  
+                // float3 worldPosOffset = float3(worldPos.x, worldPos.y , worldPos.z) - _FillAmount;
+
+                // // rotate it around XY
+                // float3 worldPosX = Unity_RotateAboutAxis_Degrees(worldPosOffset, float3(0,0,1),90);
+
+                // // rotate around XZ
+                // float3 worldPosZ = Unity_RotateAboutAxis_Degrees(worldPosOffset, float3(1,0,0),90);
+
+                // // combine rotations with worldPos, based on sine wave from script
+                // float3 worldPosAdjusted = worldPos + (worldPosX  * _WobbleX)+ (worldPosZ* _WobbleZ); 
+
+                // // how high up the liquid is
+                // o.fillPosition =  worldPosAdjusted - _FillAmount;
+
+
+            fragUV              = uv;
+            fragWPos            = wPos.xyz;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position = projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+
+        uniform vec3 cameraPosition;
+
+        in  vec3    fragWPos;
+        in  vec3    fragNorm;
+        in  vec2    fragUV;
+
+        in  vec3    fillPos;
+
+        out vec4    outColor;
+
+        // #####################################################################
+
+
+        // #####################################################################
+
+        void main(){
+            // if( fragWPos.y >= 0.5 ) discard;
+            
+            outColor     = vec4( 1.0 );
+
+            float wobbleIntensity = 0.1;
+            float fillAt = fillPos.y;
+
+            outColor.a   = 1.0 - step( 0.5, fillAt );
+            outColor.rgb = ( gl_FrontFacing )? 
+                vec3( fillPos.y ) : 
+                vec3( 1.0, 1.0, 0.0 ) ;
+
+            float _Line = 0.05 ;
+            float _LineSmooth = 0.0;
+            float cutoffTop = step( fillPos.y, 0.5 );
+            float foam = cutoffTop * smoothstep( 0.5 - _Line - _LineSmooth, 0.5 - _Line , fillAt );
+            // vec4 foamColored = foam * _FoamColor;
+
+            float result = cutoffTop - foam;
+
+            outColor.rgb = vec3( result * vec3(0.0,1.0,1.0) + foam * vec3(1.0,0.0,0.0) );
+            // outColor.a = 1.0;
+
+            outColor.rgb = ( gl_FrontFacing )? 
+            outColor.rgb : 
+                vec3( 1.0, 1.0, 0.0 ) ;
+        }`
+    });
+
+    Object.defineProperty( mat, 'wobbleX', {
+        set: v=>{ mat.uniforms.wobbleX.value = v; },
+    });
+
+    Object.defineProperty( mat, 'wobbleY', {
+        set: v=>{ mat.uniforms.wobbleY.value = v; },
+    });
+
+    Object.defineProperty( mat, 'fillAmount', {
+        set: v=>{ vec3.copy( mat.uniforms.fillAmount.value, v ); },
+    });
+
+    return mat;
+}
+
+
+// Upgrade NOTE: replaced '_Object2World' with 'unity_ObjectToWorld'
+
+// Shader "Unlit/FX/Liquid"
+// {
+//     Properties
+//     {
+//         [Header(Main)]
+//         [HDR]_Tint ("Tint", Color) = (1,1,1,1)
+//         _MainTex ("Texture", 2D) = "white" {}
+//         [HDR]_TopColor ("Top Color", Color) = (1,1,1,1)
+//         [Header(Foam)]
+//         [HDR]_FoamColor ("Foam Line Color", Color) = (1,1,1,1)
+//         _Line ("Foam Line Width", Range(0,0.1)) = 0.0    
+//         _LineSmooth ("Foam Line Smoothness", Range(0,0.1)) = 0.0    
+//         [Header(Rim)]
+//         [HDR]_RimColor ("Rim Color", Color) = (1,1,1,1)
+//         _RimPower ("Rim Power", Range(0,10)) = 0.0
+//         [Header(Sine)]
+//         _Freq ("Frequency", Range(0,15)) = 8
+//         _Amplitude ("Amplitude", Range(0,0.5)) = 0.15
+//     }
+    
+//     SubShader
+//     {
+//         Tags {"Queue"="Geometry"  "DisableBatching" = "True" }
+        
+//         Pass
+//         {
+//             Zwrite On
+//             Cull Off // we want the front and back faces
+//             AlphaToMask On // transparency
+
+//             CGPROGRAM
+//             #pragma vertex vert
+//             #pragma fragment frag
+//             // make fog work
+//             #pragma multi_compile_fog
+            
+//             #include "UnityCG.cginc"
+            
+//             struct appdata
+//             {
+//                 float4 vertex : POSITION;
+//                 float2 uv : TEXCOORD0;
+//                 float3 normal : NORMAL;	
+//             };
+            
+//             struct v2f
+//             {
+//                 float2 uv : TEXCOORD0;
+//                 UNITY_FOG_COORDS(1)
+//                 float4 vertex : SV_POSITION;
+//                 float3 viewDir : COLOR;
+//                 float3 normal : COLOR2;		
+//                 float3 fillPosition : TEXCOORD2;
+//                 float3 worldNormal : TEXCOORD3;
+//             };
+            
+//             sampler2D _MainTex;
+//             float4 _MainTex_ST;
+//             float3 _FillAmount;
+//             float _WobbleX, _WobbleZ;
+//             float4 _TopColor, _RimColor, _FoamColor, _Tint;
+//             float _Line, _RimPower, _LineSmooth;
+//             float _Freq, _Amplitude;
+
+
+//             // https://docs.unity3d.com/Packages/com.unity.shadergraph@6.9/manual/Rotate-About-Axis-Node.html
+//             float3 Unity_RotateAboutAxis_Degrees(float3 In, float3 Axis, float Rotation)
+//             {
+//                 Rotation = radians(Rotation);
+//                 float s = sin(Rotation);
+//                 float c = cos(Rotation);
+//                 float one_minus_c = 1.0 - c;
+
+//                 Axis = normalize(Axis);
+//                 float3x3 rot_mat = 
+//                 {   one_minus_c * Axis.x * Axis.x + c, one_minus_c * Axis.x * Axis.y - Axis.z * s, one_minus_c * Axis.z * Axis.x + Axis.y * s,
+//                     one_minus_c * Axis.x * Axis.y + Axis.z * s, one_minus_c * Axis.y * Axis.y + c, one_minus_c * Axis.y * Axis.z - Axis.x * s,
+//                     one_minus_c * Axis.z * Axis.x - Axis.y * s, one_minus_c * Axis.y * Axis.z + Axis.x * s, one_minus_c * Axis.z * Axis.z + c
+//                 };
+//                 float3 Out = mul(rot_mat,  In);
+//                 return Out;
+//             }
+
+
+//             v2f vert (appdata v)
+//             {
+//                 v2f o;
+
+//                 o.vertex = UnityObjectToClipPos(v.vertex);
+//                 o.uv = TRANSFORM_TEX(v.uv, _MainTex);
+//                 UNITY_TRANSFER_FOG(o,o.vertex);
+//                 // get world position of the vertex - transform position
+//                 float3 worldPos = mul (unity_ObjectToWorld, v.vertex.xyz);  
+//                 float3 worldPosOffset = float3(worldPos.x, worldPos.y , worldPos.z) - _FillAmount;
+//                 // rotate it around XY
+//                 float3 worldPosX= Unity_RotateAboutAxis_Degrees(worldPosOffset, float3(0,0,1),90);
+//                 // rotate around XZ
+//                 float3 worldPosZ = Unity_RotateAboutAxis_Degrees(worldPosOffset, float3(1,0,0),90);
+//                 // combine rotations with worldPos, based on sine wave from script
+//                 float3 worldPosAdjusted = worldPos + (worldPosX  * _WobbleX)+ (worldPosZ* _WobbleZ); 
+//                 // how high up the liquid is
+//                 o.fillPosition =  worldPosAdjusted - _FillAmount;
+//                 o.viewDir = normalize(WorldSpaceViewDir(v.vertex));
+//                 o.normal = v.normal;
+//                 o.worldNormal  = mul ((float4x4)unity_ObjectToWorld, v.normal );
+//                 return o;
+//             }
+            
+//             fixed4 frag (v2f i, fixed facing : VFACE) : SV_Target
+//             {          
+//                 float3 worldNormal = mul( unity_ObjectToWorld, float4( i.normal, 0.0 ) ).xyz;
+//                 // rim light              
+//                 float fresnel = pow(1 - saturate(dot(worldNormal, i.viewDir)), _RimPower);          
+//                 float4 RimResult = fresnel * _RimColor;
+//                 RimResult *= _RimColor;
+                
+//                 // add movement based deform, using a sine wave
+//                 float wobbleIntensity =  abs(_WobbleX) + abs(_WobbleZ);            
+//                 float wobble = sin((i.fillPosition.x * _Freq) + (i.fillPosition.z * _Freq ) + ( _Time.y)) * (_Amplitude *wobbleIntensity);               
+//                 float movingfillPosition = i.fillPosition.y + wobble;
+
+//                 // sample the texture based on the fill line
+//                 fixed4 col = tex2D(_MainTex, movingfillPosition) * _Tint;
+//                 // apply fog
+//                 UNITY_APPLY_FOG(i.fogCoord, col);
+
+//                 // foam edge
+//                 float cutoffTop = step(movingfillPosition, 0.5);
+//                 float foam = cutoffTop * smoothstep(0.5 - _Line- _LineSmooth, 0.5 - _Line ,movingfillPosition);
+//                 float4 foamColored = foam * _FoamColor;
+
+//                 // rest of the liquid minus the foam
+//                 float result = cutoffTop - foam;
+//                 float4 resultColored = result * col;
+
+//                 // both together, with the texture
+//                 float4 finalResult = resultColored + foamColored;				
+//                 finalResult.rgb += RimResult;
+
+//                 // little edge on the top of the backfaces
+//                 float backfaceFoam = (cutoffTop * smoothstep(0.5 - (0.2 * _Line)- _LineSmooth,0.5 - (0.2 * _Line),movingfillPosition ));
+//                 float4 backfaceFoamColor = _FoamColor * backfaceFoam;
+//                 // color of backfaces/ top
+//                 float4 topColor = (_TopColor * (1-backfaceFoam) + backfaceFoamColor) * (foam + result);
+
+//                 // clip above the cutoff
+//                 clip(result + foam - 0.01);
+
+//                 //VFACE returns positive for front facing, negative for backfacing
+//                 return facing > 0 ? finalResult: topColor;
+                
+                
+//             }
+//             ENDCG
+//         }
+        
+//     }
+// }
+
+</script></body></html>

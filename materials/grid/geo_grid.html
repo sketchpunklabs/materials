@@ -1,0 +1,204 @@
+<!DOCTYPE html><html lang="en"><head><title></title></head>
+<style>canvas{ display:block; } body, html { padding:0px; margin:0px; width:100%; height:100%; }</style>
+<body><script src="../../import-map.js"></script><script type="module">
+import useThreeWebGL2, { useDarkScene, THREE } from '../../lib/useThreeWebGL2.js';
+
+let App   = useDarkScene( useThreeWebGL2(), { grid:false } );
+let Debug = {};
+let Ref   = {};
+
+window.addEventListener( "load", async _=>{
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.sphericalLook( 0, 20, 6 );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // const geo  = new THREE.PlaneBufferGeometry( size, size, 1, 1 );
+    // geo.rotateX( Math.PI * 0.5 );
+    const geo  = new THREE.SphereGeometry( 3, 32, 16 );
+    const mesh = new THREE.Mesh( geo, customMaterial() );
+    // mesh.frustumCulled = false;
+    // mesh.renderOrder   = -900;
+    // mesh.position.y = -1.5;
+    // mesh.rotation.z = -90 * Math.PI / 180;
+    App.scene.add( mesh );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App.renderLoop();
+});
+
+
+// https://github.com/kenjinp/world-synth/blob/main/apps/examples/src/pages/home/Home.tsx#L120
+
+
+function rgba( c, a=1.0 ){
+    const NORMALIZE_RGB	= 1 / 255.0;
+    return [
+        ( c >> 16 & 255 ) * NORMALIZE_RGB,
+        ( c >> 8 & 255 )  * NORMALIZE_RGB,
+        ( c & 255 )       * NORMALIZE_RGB,
+        a
+    ];
+}
+
+
+function customMaterial(){
+    const mat = new THREE.RawShaderMaterial({
+        name            : 'GeoGrid',
+        side            : THREE.DoubleSide,
+        depthTest       : true,
+        transparent 	: true,
+        alphaToCoverage : true,
+        extensions      : { derivatives : true },
+
+        uniforms        : {
+        },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        // uniform highp vec3 cameraPosition;
+
+        uniform mat4  modelMatrix;
+        uniform mat4  viewMatrix;
+        uniform mat4  projectionMatrix;
+
+        out vec3  fragWPos;
+        
+        // ############################################################
+
+        void main(){
+            vec4 wPos       = modelMatrix * vec4( position, 1.0 );
+            fragWPos        = wPos.xyz;
+            gl_Position     = projectionMatrix * viewMatrix * wPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+                
+        // uniform highp vec3 cameraPosition;
+        in vec3 fragWPos;
+        out vec4 outColor;
+
+        // #####################################################################
+
+        // #####################################################################
+        void main(){                          
+            outColor = vec4( 1.0, 0.0, 0.0, 1.0 );
+        }`
+    });
+
+    return mat;
+}
+
+
+/*
+<CustomShaderMaterial
+          vertexColors
+          uniforms={{
+            uCameraPosition: { value: camera.position },
+            uLineWidth: { value: lineWidth },
+            uContourWidth: { value: contourWidth },
+            uSubgridAlpha: { value: subgridAlpha },
+            uContourAlpha: { value: contourAlpha },
+          }}
+          baseMaterial={MeshPhysicalMaterial}
+          vertexShader={
+            `
+            varying mat4 vModelMatrix;
+            varying vec3 vPosition;
+            varying vec2 vUv;
+
+            void main() {
+              vPosition = position;
+              vModelMatrix = modelMatrix; 
+              vUv = uv;
+            }
+
+          `
+          }
+          fragmentShader={
+            `
+            varying vec3 vPosition;
+            varying mat4 vModelMatrix;
+            float radius = ${EARTH_RADIUS}.0;
+            uniform vec3 uCameraPosition;
+            uniform float uLineWidth;
+            uniform float uSubgridAlpha;
+            uniform float uContourAlpha;
+            uniform float uContourWidth;
+            varying vec2 vUv;
+
+
+            vec3 grid(vec2 p)
+            {
+                return vec3(1.0)*smoothstep(0.99,1.0,max(sin((p.x)*20.0),sin((p.y)*20.0)));
+            }
+            
+            float remap( in float value, in float x1, in float y1, in float x2, in float y2) {
+              return ((value - x1) * (y2 - x2)) / (y1 - x1) + x2;
+            }
+
+            float RAD2DEG = 180.0 / 3.1415926535897932384626433832795;
+
+            struct LatLong {
+              float lat;
+              float lon;
+            };
+
+            LatLong getLatLong(vec3 position, float radius) {
+              float longitude = atan(position.z, position.x) * RAD2DEG;
+              float latitude = atan(position.y, length(position.xz)) * RAD2DEG;
+              return LatLong(latitude, longitude);
+            }
+
+            float getGrid(vec2 localPosition, float size, float thickness) {
+              vec2 r = localPosition.xy / size;
+              vec2 grid = abs(fract(r - 0.5) - 0.5) / fwidth(r);
+              float line = min(grid.x, grid.y) + 1.0 - thickness;
+              return 1.0 - min(line, 1.0);
+            }
+
+            float getGridFromFloat(float localPosition, float size, float thickness) {
+              float r = localPosition / size;
+              float grid = abs(fract(r - 0.5) - 0.5) / fwidth(r);
+              float line = grid + 1.0 - thickness;
+              return 1.0 - min(line, 1.0);
+            }
+
+            void main() {
+              vec3 wPosition = (vModelMatrix * vec4(vPosition, 1.0)).xyz;
+              LatLong latlong = getLatLong(wPosition, radius);
+              float lineWidth = uLineWidth;
+              float latRepititions = 18.;
+              float lonRepititions = 36.;
+              vec2 latlongUV = vec2(
+                remap(latlong.lat, -90., 90., 0., 1.) * latRepititions,
+                remap(latlong.lon, -180., 180., 0., 1.) * lonRepititions
+              );
+
+              // contour line stuff
+              float contourWidth = uContourWidth;
+              float elevationAboveDatum = length(wPosition) - radius;
+              float normalizedElevationAboveDatum = elevationAboveDatum / contourWidth;
+              float dh = fwidth(normalizedElevationAboveDatum);
+              float contourLineWidth = lineWidth * 1.0/sqrt(1.0+dh*dh);
+              float contourGrid = getGridFromFloat(normalizedElevationAboveDatum, 1.0, contourLineWidth);
+
+              vec3 color = vColor.xyz;
+              
+              float grid = getGrid(latlongUV, 1.0, lineWidth);
+              float grid2 = getGrid(latlongUV, 0.5, lineWidth) * uSubgridAlpha;
+              float grid3 = getGrid(latlongUV, 0.1, lineWidth) * uSubgridAlpha;
+              contourGrid *= uContourAlpha;
+              float combinedGrid = grid + grid2 + grid3 + contourGrid;
+
+              csm_DiffuseColor = vec4(mix(color, vec3(1.0), combinedGrid), 1.0);
+            }
+          `
+          }
+        />
+*/
+
+</script></body></html>

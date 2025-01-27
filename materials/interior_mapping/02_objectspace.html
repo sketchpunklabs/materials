@@ -1,0 +1,265 @@
+<!DOCTYPE html><html><head><title></title></head><body><script src="../../import-map.js"></script><script type="module">
+import Starter, { THREE }   from '../../lib/Starter.js';
+
+let App;
+let Debug = {};
+let Ref   = {};
+
+function texLoader( url ){
+    const tex  = new THREE.TextureLoader().load( url );
+    tex.wrapS  = THREE.RepeatWrapping;
+    tex.wrapT  = THREE.RepeatWrapping;
+    return tex;
+}
+
+window.addEventListener( "load", _=>{
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App = new Starter( { webgl2:true, grid:true } );
+	App.setCamera( 0, 10, 2.4, [0,0.6,0] ).render();
+
+    const texBack   = texLoader( '../interior/imgs/BrickWall_1.png' );
+    const texWall   = texLoader( '../interior/imgs/BrickWall_2.png' );
+    const texCeil   = texLoader( '../interior/imgs/Ceiling.png' );
+    const texFloor  = texLoader( '../interior/imgs/WoodFloor.png' );
+    const texFacade = texLoader( '../interior/imgs/Facade_2.png' );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Ref.mat    = customMaterial( texFacade, texBack, texWall, texCeil, texFloor );
+    const geo  = new THREE.BoxGeometry( 1, 1 );  //new THREE.PlaneGeometry( 1, 1 );
+    const mesh = new THREE.Mesh( geo, Ref.mat );
+    mesh.position.y = 0.5;
+    App.add( mesh );
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // UI
+    const onChange = ( id, fn )=>{ document.getElementById( id ).addEventListener( 'change', fn, true ); }
+    const onInput  = ( id, fn )=>{ document.getElementById( id ).addEventListener( 'input', fn, true ); }
+    const fn       = e=>{ Ref.mat[ e.target.id ] = e.target.value; };
+    onInput( 'TilingX', fn );
+    onInput( 'TilingY', fn );
+    onInput( 'OffsetX', fn );
+    onInput( 'OffsetY', fn );
+});
+
+// part 1 https://www.youtube.com/watch?v=2qVSV5dhdb0 
+// part 2 https://www.youtube.com/watch?v=5v6tvkb63XU 
+// part 3 https://www.youtube.com/watch?v=PHvLuS9AYS8
+
+function customMaterial( texFacade, texBack, texWall, texCeil, texFloor ){
+    const mat = new THREE.RawShaderMaterial({
+        depthTest       : true,
+        side            : THREE.DoubleSide,
+
+        uniforms        : { 
+            texFacade : { type :'sampler2D', value: texFacade },
+            texBack   : { type :'sampler2D', value: texBack },
+            texWall   : { type :'sampler2D', value: texWall },
+            texCeil   : { type :'sampler2D', value: texCeil },
+            texFloor  : { type :'sampler2D', value: texFloor },
+
+        },
+
+        extensions      : { derivatives : true },
+
+        vertexShader    : `#version 300 es
+        in	vec3    position;
+        in  vec3    normal;
+        in	vec2    uv;
+        
+        uniform     mediump mat4    modelMatrix;
+        uniform     mat4    viewMatrix;
+        uniform     mat4    projectionMatrix;
+
+        out vec3    fragOPos;  // Object/Local Space Position
+        out vec3    fragWPos;  // World Space Position
+        out vec3    fragNorm;
+        out vec2    fragUV;
+        
+        void main(){
+            vec4 wPos 	        = modelMatrix * vec4( position, 1.0 );  // World Space
+            vec4 vPos           = viewMatrix * wPos;                    // View Space
+            
+            fragUV              = uv;
+            fragOPos            = position;
+            fragWPos            = wPos.xyz;
+            fragNorm            = ( modelMatrix * vec4( normal, 0.0 ) ).xyz;
+
+            gl_Position			= projectionMatrix * vPos;
+        }`,
+
+        fragmentShader  : `#version 300 es
+        precision mediump float;
+        
+        uniform sampler2D texFacade;
+        uniform sampler2D texBack;
+        uniform sampler2D texWall;
+        uniform sampler2D texCeil;
+        uniform sampler2D texFloor;
+
+        // uniform float uDepth;
+        // uniform vec3 tilingx;
+        // uniform vec3 offset;
+
+        uniform mediump mat4 modelMatrix;
+        uniform         vec3 cameraPosition;
+
+        in  vec3    fragOPos;
+        in  vec3    fragWPos;
+        in  vec3    fragNorm;
+        in  vec2    fragUV;
+        out vec4    outColor;
+
+        // #####################################################################
+        void main(){
+            outColor = vec4( 1.0, 0.0, 0.0, 1.0 );
+            vec3 osCameraPos    = ( inverse( modelMatrix ) * vec4( cameraPosition, 1.0 ) ).xyz;
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // UNIFORM DATA
+            
+            // Offset to add to fragment position & camera position in Object space
+            vec3 posOffset = vec3( 0.0 );
+
+            // Scaling the textures
+            vec3 tiling    = vec3( 1.0 ); // vec3( 1.0, 1.0, 1.0 );
+            
+            // XYZ if divide per plane, Need to tune it around 0.31 tho because of how rmTiling is computed
+            vec3 Rooms     = vec3( 2.0 ) + .31; // vec3( 2.31, 2.31, 2.31 );
+
+            // The general size of the room, I think.
+            float RoomTile = 1.0; 
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // -1E-0.5 = -1 * 10^-0.5 = -0.31622776601
+            // -0.31 is what makes hiding the faces at the edges when looking from outside work
+            // can't find any way to remove this value to simplify things
+            vec3 rmTiling  = ( Rooms + vec3( -0.31622776601 ) ) * RoomTile;
+
+            vec3 offPos    = ( fragOPos - posOffset );          // Obj Space Position with possible offset
+            vec3 fOffPos   = floor( offPos * rmTiling );        // Absolute cell position
+            vec3 offCamPos = osCameraPos - posOffset;           // Object Space Camera Pos with possible offset
+            vec3 camToFrag = offPos - offCamPos;                // Direction from cam to fragment in Object Space
+
+            vec3 axisSign  = step( vec3( 0.0 ), camToFrag );    // Which side of the axis 0:Negative, 1:Positive
+            
+            // Think this does some sort of frustum projection of the pixel which then is later
+            // used to determine the UV value of each plane in the frustum
+            vec3 proj      = ( ( fOffPos + axisSign ) / rmTiling - offCamPos ) / camToFrag;
+
+            // outColor.rgb   = vec3( fract( proj.x ) );
+
+            // Reuse for all UV projections
+            vec2 projUV    = vec2( 0.0 );
+   
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Left & Right Wall
+            projUV          = ( ( proj.x * camToFrag ) + offCamPos ).zy * tiling.x;
+            vec4 sideColor  = texture( texWall, projUV );
+            // outColor = sideColor;
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // BACK WALL
+            projUV         = ( ( proj.z * camToFrag ) + offCamPos ).xy * tiling.z;
+            vec4 backColor = texture( texBack, projUV );
+            // outColor = backColor;
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Ceiling & Floor
+            projUV        = ( ( proj.y * camToFrag ) + offCamPos ).xz * tiling.y;
+            vec4 floorCol = texture( texFloor, projUV );
+            vec4 ceilCol  = texture( texCeil, projUV );
+
+            // determine which tile to use based on cam's relative y position
+            vec4 floorCeil = mix( floorCol, ceilCol, step( 0.0, camToFrag.y ) ); 
+            
+            // outColor = yColor;
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Mixing the textures
+            
+            // Use back or side Wall
+            vec4 wallOrBack = ( step( proj.z, proj.x  ) > 0.0 )? backColor : sideColor;
+
+            // Use wall or floor/ceiling
+            float xIf       = ( step( proj.z, proj.x ) > 0.0 )? proj.z : proj.x;
+            vec4 paraColor  = ( proj.y > xIf )? wallOrBack : floorCeil;
+            
+            outColor = paraColor;
+
+            
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Facade
+
+            // float facadeTiling = 1.0;
+            // vec2 facadeUV      = fragUV * facadeTiling;
+            // outColor.rgb       = vec3( facadeUV, 0.0 );
+            // vec4 facadeColor   = texture( texFacade, facadeUV );
+            // outColor = facadeColor;
+            // outColor = mix( paraColorX, facadeColor , facadeColor.a );
+
+
+            /*
+            vec3 norm      = normalize( fragNorm );
+            vec2 uv        = fract( fragUV * tiling + offset );
+
+            vec3 frag2Eye  = normalize( cameraPosition - fragWPos );
+            mat3 tbn       = tbnMatrix( fragNorm, fragWPos, uv );
+
+            // SKETCHPUNK - This lil extra tweak allows the projection to 
+            // somewhat work work behind the plane. If using on a front 
+            // facing only plane this remove this line as its not need. Just here for fun.
+            frag2Eye       = frag2Eye * sign( frag2Eye.z );  
+
+            vec3 tanDir    = normalize( tbn * frag2Eye );    // Move to Eye Direction into Tangent Space
+            vec3 tanDirInv = 1.0 / tanDir;                   // Inverse vector is needed for Parallax math?
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // I believe this is creating a position in Tangent Space.
+            // Taking UV and making the center origin then setting Z 
+            // as the distance where the back plane should be rendered 
+            // away from the front of the plane
+
+            // NOTE : Z can controls depth but need a way to fix
+            // the other 4 faces to repeat when changing depth else
+            // things just leak into the front face texture
+            vec3 pos = vec3( uv * 2.0 - 1.0, -1.0 );
+            
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Not sure what this line does, I suspect its a form of Parallax.
+            // The math is somewhat similar from an old example I have. Its
+            // used as a scalar for the Tangent direction of Frag 2 Eye
+            float fmin = minComponent( abs( tanDirInv ) - tanDirInv * pos );
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // Compute final direction to use on a cubemap texture
+            tanDir   = tanDir * fmin + pos;
+            outColor = texture( texCube, tanDir );
+            */
+        }`
+    });
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // SETTERS
+    Object.defineProperty( mat, 'TilingX', { set: ( v )=>{ mat.uniforms.tiling.value[0] = v; } });
+    Object.defineProperty( mat, 'TilingY', { set: ( v )=>{ mat.uniforms.tiling.value[1] = v; } });
+    Object.defineProperty( mat, 'OffsetX', { set: ( v )=>{ mat.uniforms.offset.value[0] = v; } });
+    Object.defineProperty( mat, 'OffsetY', { set: ( v )=>{ mat.uniforms.offset.value[1] = v; } });
+
+    return mat;
+}
+
+</script>
+
+<style>
+    .row{ display: flex; align-items:center; }
+    label{ width:80px; }
+</style>
+
+<div style="position:fixed; top:10px; left:10px;">
+    <div class="row"><label>Tile X :</label><input type="range" id="TilingX" min="1" max="3" step="1" value="1.0"></div>
+    <div class="row"><label>Tile Y : </label><input type="range" id="TilingY" min="1" max="3" step="1" value="1.0"></div>
+    <div class="row"><label>Offset X :</label><input type="range" id="OffsetX" min="0" max="1" step="0.1" value="0"></div>
+    <div class="row"><label>Offset Y :</label><input type="range" id="OffsetY" min="0" max="1" step="0.1" value="0"></div>
+</div>
+
+</body></html>
